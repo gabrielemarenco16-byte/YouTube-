@@ -46,6 +46,8 @@ class GenerationPipeline(
     private val settings: AppSettings,
     /** Voce da usare (intercambiabile: nei test si può sostituire). */
     private val voiceFactory: (Context) -> VoiceProvider = ::AndroidTtsVoiceProvider,
+    /** Se false, il video viene creato anche quando tutte le scene sono segnaposto (solo per i test). */
+    private val requireRealMedia: Boolean = true,
     private val onState: (GenerationState.Running) -> Unit,
 ) {
     private val history = TopicHistory(context)
@@ -228,7 +230,7 @@ class GenerationPipeline(
         manifestFile.writeText(Http.json.encodeToString(MediaManifest.serializer(), MediaManifest(result.media)))
         warnings += result.warnings
 
-        if (result.placeholderCount == script.scenes.size) {
+        if (requireRealMedia && result.placeholderCount == script.scenes.size) {
             // Nessuna scena riuscita: quasi sempre chiave mancante o non valida. Meglio fermarsi.
             throw GenerationException("Nessuna immagine o video trovato. ${result.warnings.firstOrNull().orEmpty()}")
         }

@@ -86,6 +86,7 @@ class EndToEndTest {
         val voiceKind = StringBuilder("sintesi vocale Android")
         val pipeline = GenerationPipeline(
             context, settings,
+            requireRealMedia = false,
             voiceFactory = { ctx -> FallbackVoice(ctx) { voiceKind.clear().append("voce sintetica di test (TTS non disponibile sull'emulatore)") } },
             onState = { Log.i(tag, "${it.phase.label} ${(it.progress * 100).toInt()}% ${it.detail}") },
         )
