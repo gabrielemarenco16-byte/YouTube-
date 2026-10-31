@@ -45,6 +45,22 @@ object SubtitleChunker {
         }
     }
 
+    /** Indice del sottotitolo attivo al tempo [ms] (ricerca binaria), -1 se nessuno. */
+    fun cueIndexAt(cues: List<SubtitleCue>, ms: Long): Int {
+        var lo = 0
+        var hi = cues.lastIndex
+        while (lo <= hi) {
+            val mid = (lo + hi) ushr 1
+            val c = cues[mid]
+            when {
+                ms < c.startMs -> hi = mid - 1
+                ms >= c.endMs -> lo = mid + 1
+                else -> return mid
+            }
+        }
+        return -1
+    }
+
     /** Testo pulito per lo schermo: maiuscolo, senza punteggiatura finale superflua. */
     fun displayText(text: String): String =
         text.uppercase().trim().trimEnd(',', ';', ':', '.').trim()
