@@ -46,6 +46,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -215,7 +216,7 @@ private fun ProgressCard(state: GenerationState.Running, onCancel: () -> Unit) {
 
 @Composable
 private fun PhaseSteps(current: Phase) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+    Row(Modifier.fillMaxWidth()) {
         Phase.entries.forEach { p ->
             val color = when {
                 p.ordinal < current.ordinal -> MaterialTheme.colorScheme.secondary
@@ -223,7 +224,15 @@ private fun PhaseSteps(current: Phase) {
                 else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
             }
             val mark = if (p.ordinal < current.ordinal) "✓ " else ""
-            Text(mark + p.label, color = color, style = MaterialTheme.typography.labelSmall)
+            Text(
+                mark + p.label,
+                color = color,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.weight(1f),
+            )
         }
     }
 }
