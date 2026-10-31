@@ -1,6 +1,7 @@
 package it.shortsgen.app.script
 
 import it.shortsgen.app.core.ApiException
+import it.shortsgen.app.core.ErrorMessages
 import it.shortsgen.app.core.GenerationException
 import it.shortsgen.app.core.Http
 import it.shortsgen.app.core.executeForString
@@ -53,7 +54,10 @@ object GeminiModels {
     private val EXCLUDED_ALWAYS = listOf("embedding", "tts", "audio", "live", "aqa", "learnlm", "robotics", "computer-use")
 
     /** Sceglie il modello più adatto; null se nessuno è adatto. */
-    fun pick(models: List<String>, kind: Kind): String? {
+    fun pick(models: List<String>, kind: Kind): String? = rank(models, kind).firstOrNull()
+
+    /** Modelli adatti, dal migliore al peggiore. */
+    fun rank(models: List<String>, kind: Kind): List<String> {
         val candidates = models.map { it.lowercase() to it }.filter { (lower, _) ->
             lower.startsWith("gemini") && EXCLUDED_ALWAYS.none { it in lower } &&
                 when (kind) {
@@ -69,7 +73,7 @@ object GeminiModels {
                 .thenBy { (lower, _) -> if (kind == Kind.TEXT && "pro" in lower) 1 else 0 }
                 .thenBy { (lower, _) -> if (lower.endsWith("latest")) 0 else 1 }
                 .thenBy { (lower, _) -> lower.length }
-        ).firstOrNull()?.second
+        ).map { it.second }
     }
 
     /** "gemini-2.5-flash" -> 2.5 ; "gemini-flash-latest" -> 0 */
@@ -95,17 +99,37 @@ object GeminiModels {
             if (!isModelNotFound(e)) throw e
         }
         val available = listModels(apiKey, client, baseUrl)
-        val replacement = pick(available.filter { it != configured.trim() }, kind)
-            ?: throw GenerationException(
+        val candidates = rank(available.filter { it != configured.trim() }, kind).take(MAX_ATTEMPTS)
+        if (candidates.isEmpty()) {
+            throw GenerationException(
                 if (kind == Kind.IMAGE) {
                     "La tua chiave Gemini non ha accesso a nessun modello per creare immagini. " +
                         "Nelle Impostazioni scegli Cloudflare per le immagini."
                 } else {
-                    "Il modello \"$configured\" non esiste più e non ho trovato alternative per la tua chiave Gemini."
+                    "Il modello \"$configured\" non è disponibile e la tua chiave Gemini non vede altri modelli di testo " +
+                        "(modelli trovati: ${available.size}). Controlla la chiave o prova Groq."
                 }
             )
-        val result = call(replacement)
-        onResolved(replacement)
-        return result
+        }
+        val tried = mutableListOf(configured.trim())
+        var lastError: ApiException? = null
+        for (candidate in candidates) {
+            try {
+                val result = call(candidate)
+                onResolved(candidate)
+                return result
+            } catch (e: ApiException) {
+                if (!isModelNotFound(e)) throw e
+                tried += candidate
+                lastError = e
+            }
+        }
+        throw GenerationException(
+            "Nessun modello Gemini funziona con la tua chiave (provati: ${tried.joinToString(", ")}). " +
+                "Dettaglio di Google: ${lastError?.let { ErrorMessages.apiMessage(it) } ?: "-"}",
+            lastError,
+        )
     }
+
+    private const val MAX_ATTEMPTS = 6
 }

@@ -42,7 +42,7 @@ object ErrorMessages {
     fun apiMessage(e: ApiException): String = when (e.code) {
         400 -> "${e.provider}: richiesta rifiutata (400). Controlla il nome del modello nelle Impostazioni. Dettaglio: ${shortDetail(e.body)}"
         401, 403 -> "${e.provider}: chiave API non valida o senza permessi (${e.code}). Controllala nelle Impostazioni."
-        404 -> "${e.provider}: modello o indirizzo non trovato (404). Controlla il nome del modello nelle Impostazioni."
+        404 -> "${e.provider}: modello o indirizzo non trovato (404). Controlla il nome del modello nelle Impostazioni. Dettaglio: ${shortDetail(e.body)}"
         429 -> "${e.provider}: limite di richieste gratuite raggiunto (429). Aspetta qualche minuto e riprova."
         in 500..599 -> "${e.provider}: il servizio ha un problema temporaneo (${e.code}). Riprova più tardi."
         else -> "${e.provider}: errore HTTP ${e.code}. ${shortDetail(e.body)}"

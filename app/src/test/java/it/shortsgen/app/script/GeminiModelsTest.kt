@@ -78,4 +78,25 @@ class GeminiModelsTest {
             server.shutdown()
         }
     }
+
+    @Test
+    fun triesNextCandidateWhenFirstReplacementAlso404() = runTest {
+        val server = MockWebServer()
+        server.start()
+        try {
+            server.enqueue(MockResponse().setResponseCode(404).setBody("{}"))
+            server.enqueue(MockResponse().setBody(listJson))
+            server.enqueue(MockResponse().setResponseCode(404).setBody("{}")) // gemini-3.0-flash
+            server.enqueue(MockResponse().setBody("""{"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}"""))
+            var saved: String? = null
+            val provider = GeminiTextProvider(
+                "K", "gemini-flash-latest", OkHttpClient(), server.url("/").toString().trimEnd('/'),
+                onModelChanged = { saved = it },
+            )
+            assertEquals("ok", provider.complete("x"))
+            assertEquals("gemini-3.0-flash-lite", saved)
+        } finally {
+            server.shutdown()
+        }
+    }
 }
