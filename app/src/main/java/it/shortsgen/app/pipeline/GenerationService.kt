@@ -69,10 +69,10 @@ class GenerationService : Service() {
             val settings = SettingsRepository(this).load()
             val dir = (if (resume) jobs.currentJob() else null) ?: jobs.newJob()
             GenerationRepository.update(GenerationState.Running(Phase.SCRIPT, 0f, "Avvio…"))
-            pipeline = GenerationPipeline(this, settings) { running ->
+            pipeline = GenerationPipeline(this, settings, onState = { running ->
                 GenerationRepository.update(running)
                 updateProgressNotification(running)
-            }
+            })
             val result = pipeline.run(dir)
             jobs.saveResult(result)
             GenerationRepository.update(GenerationState.Success(result))

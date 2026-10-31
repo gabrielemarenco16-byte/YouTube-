@@ -1,15 +1,19 @@
 package it.shortsgen.app.video
 
 import it.shortsgen.app.voice.WordTiming
+import kotlinx.serialization.Serializable
 import it.shortsgen.app.voice.WordTimingEstimator
 
+@Serializable
 data class SubtitleCue(val text: String, val startMs: Long, val endMs: Long)
 
 /** Una scena sulla linea temporale finale del video. */
+@Serializable
 data class SceneSlot(val index: Int, val startMs: Long, val durationMs: Long) {
     val endMs: Long get() = startMs + durationMs
 }
 
+@Serializable
 data class Timeline(val scenes: List<SceneSlot>, val cues: List<SubtitleCue>) {
     val totalMs: Long get() = scenes.lastOrNull()?.endMs ?: 0
 }
@@ -17,32 +21,53 @@ data class Timeline(val scenes: List<SceneSlot>, val cues: List<SubtitleCue>) {
 object SubtitleChunker {
 
     /**
-     * Raggruppa le parole a [maxWords] per volta. Un gruppo si chiude prima
-     * se una parola termina una frase, così i sottotitoli seguono il senso.
+     * Dimensioni dei gruppi per [n] parole: gruppi da [size]; se ne avanzerebbe una sola,
+     * gli ultimi due gruppi diventano da 2 (es. 7 parole = 3+2+2), così non resta una parola isolata.
      */
-    fun chunk(words: List<WordTiming>, maxWords: Int = 3): List<SubtitleCue> {
+    fun groupSizes(n: Int, size: Int = 3): List<Int> {
+        if (n <= 0) return emptyList()
+        if (n <= size) return listOf(n)
+        val full = n / size
+        return when (n % size) {
+            0 -> List(full) { size }
+            1 -> if (size == 3) List(full - 1) { size } + listOf(2, 2) else List(full) { size } + 1
+            else -> List(full) { size } + (n % size)
+        }
+    }
+
+    /**
+     * Raggruppa TUTTE le parole, in ordine, a gruppi di [maxWords].
+     * Ogni sottotitolo resta visibile fino all'inizio del successivo; l'ultimo fino a [endMs].
+     */
+    fun chunk(words: List<WordTiming>, maxWords: Int = 3, endMs: Long? = null): List<SubtitleCue> {
         val cues = ArrayList<SubtitleCue>()
-        var group = ArrayList<WordTiming>()
-        fun flush() {
-            if (group.isEmpty()) return
-            cues += SubtitleCue(
-                text = group.joinToString(" ") { it.word },
-                startMs = group.first().startMs,
-                endMs = group.last().endMs,
-            )
-            group = ArrayList()
+        var index = 0
+        for (size in groupSizes(words.size, maxWords)) {
+            val group = words.subList(index, index + size)
+            index += size
+            cues += SubtitleCue(group.joinToString(" ") { it.word }, group.first().startMs, group.last().endMs)
         }
-        for (w in words) {
-            group += w
-            val endsSentence = w.word.endsWith(".") || w.word.endsWith("!") || w.word.endsWith("?")
-            if (group.size >= maxWords || endsSentence) flush()
-        }
-        flush()
-        // Ogni sottotitolo resta visibile fino all'inizio del successivo (niente lampeggi).
         return cues.mapIndexed { i, c ->
             val next = cues.getOrNull(i + 1)
-            if (next != null && next.startMs - c.endMs in 1..600) c.copy(endMs = next.startMs) else c
+            when {
+                next != null -> c.copy(endMs = maxOf(next.startMs, c.startMs + 1))
+                endMs != null -> c.copy(endMs = maxOf(endMs, c.endMs))
+                else -> c
+            }
         }
+    }
+
+    /** Divide il testo in parole; la punteggiatura isolata (es. "—") resta attaccata alla parola prima. */
+    fun words(text: String): List<String> {
+        val result = ArrayList<String>()
+        for (token in text.split(Regex("\\s+")).filter { it.isNotBlank() }) {
+            if (token.none { it.isLetterOrDigit() } && result.isNotEmpty()) {
+                result[result.lastIndex] = result.last() + token
+            } else {
+                result += token
+            }
+        }
+        return result
     }
 
     /** Indice del sottotitolo attivo al tempo [ms] (ricerca binaria), -1 se nessuno. */
@@ -70,11 +95,14 @@ object TimelineBuilder {
 
     data class SceneAudio(
         val narration: String,
-        /** durata del parlato della scena */
+        /** durata dell'audio della scena (senza la pausa aggiunta) */
         val speechMs: Long,
-        /** durata della scena nel video (parlato + pausa finale) */
+        /** durata della scena nel video (audio + pausa finale) */
         val slotMs: Long,
         val wordTimings: List<WordTiming>? = null,
+        /** inizio/fine della voce dentro l'audio (silenzio iniziale e finale esclusi) */
+        val voiceStartMs: Long = 0,
+        val voiceEndMs: Long = speechMs,
     )
 
     fun build(scenes: List<SceneAudio>, wordsPerCue: Int = 3): Timeline {
@@ -83,10 +111,19 @@ object TimelineBuilder {
         var cursor = 0L
         scenes.forEachIndexed { i, s ->
             slots += SceneSlot(i, cursor, s.slotMs)
-            val words = s.wordTimings ?: WordTimingEstimator.estimate(s.narration, s.speechMs)
-            SubtitleChunker.chunk(words, wordsPerCue).forEach { c ->
-                val end = minOf(c.endMs, s.slotMs)
-                cues += SubtitleCue(SubtitleChunker.displayText(c.text), cursor + c.startMs, cursor + end)
+            val words = s.wordTimings ?: run {
+                // Tempi stimati: la durata della voce divisa in proporzione ai caratteri
+                val start = s.voiceStartMs.coerceIn(0, s.speechMs)
+                val end = s.voiceEndMs.coerceIn(start, s.speechMs).takeIf { it - start > 200 } ?: s.speechMs
+                WordTimingEstimator.estimate(SubtitleChunker.words(s.narration).joinToString(" "), end - start)
+                    .map { it.copy(startMs = it.startMs + start, endMs = it.endMs + start) }
+            }
+            SubtitleChunker.chunk(words, wordsPerCue, endMs = s.slotMs).forEach { c ->
+                cues += SubtitleCue(
+                    SubtitleChunker.displayText(c.text),
+                    cursor + c.startMs.coerceAtMost(s.slotMs - 1),
+                    cursor + c.endMs.coerceAtMost(s.slotMs),
+                )
             }
             cursor += s.slotMs
         }
@@ -100,10 +137,14 @@ object DurationPlanner {
     const val MAX_TOTAL_MS = 59_000L
     const val TARGET_MAX_MS = 56_000L
     const val BASE_PAUSE_MS = 350L
+
+    /** L'ultima scena dura quanto il suo audio più mezzo secondo: la frase finale non viene tagliata. */
+    const val FINAL_PAUSE_MS = 500L
     const val MAX_RATE = 1.6f
 
     fun totalWithBasePause(speechDurations: List<Long>): Long =
-        speechDurations.sum() + BASE_PAUSE_MS * speechDurations.size
+        if (speechDurations.isEmpty()) 0 else
+            speechDurations.sum() + BASE_PAUSE_MS * (speechDurations.size - 1) + FINAL_PAUSE_MS
 
     /** Se il video è troppo lungo, nuova velocità del parlato; null se va bene così. */
     fun adjustedRate(speechDurations: List<Long>, currentRate: Float): Float? {
@@ -121,6 +162,6 @@ object DurationPlanner {
         if (n == 0) return emptyList()
         val total = totalWithBasePause(speechDurations)
         val extra = if (total < MIN_TOTAL_MS) (MIN_TOTAL_MS + 500 - total) / n else 0L
-        return List(n) { BASE_PAUSE_MS + extra }
+        return List(n) { i -> (if (i == n - 1) FINAL_PAUSE_MS else BASE_PAUSE_MS) + extra }
     }
 }

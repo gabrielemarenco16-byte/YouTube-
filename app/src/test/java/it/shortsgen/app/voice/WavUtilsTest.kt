@@ -65,4 +65,24 @@ class WavUtilsTest {
         val b = write("b.wav", wav(1000, sampleRate = 16000))
         WavUtils.concat(listOf(a, b), listOf(0, 0), File(tmp.root, "o.wav"))
     }
+
+    @Test
+    fun voiceBoundsSkipSilence() {
+        val rate = 24000
+        val samples = ShortArray(rate * 2) // 2 secondi
+        // voce tra 0.5 s e 1.5 s
+        for (i in rate / 2 until rate * 3 / 2) samples[i] = (if (i % 20 < 10) 8000 else -8000).toShort()
+        val data = java.nio.ByteBuffer.allocate(samples.size * 2).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        samples.forEach { data.putShort(it) }
+        val bytes = WavUtils.header(rate, 1, 16, samples.size * 2) + data.array()
+        val (start, end) = WavUtils.voiceBounds(bytes)
+        assertEquals(500.0, start.toDouble(), 25.0)
+        assertEquals(1500.0, end.toDouble(), 25.0)
+    }
+
+    @Test
+    fun voiceBoundsOfSilenceIsWholeClip() {
+        val bytes = WavUtils.header(24000, 1, 16, 48000) + ByteArray(48000)
+        assertEquals(0L to 1000L, WavUtils.voiceBounds(bytes))
+    }
 }

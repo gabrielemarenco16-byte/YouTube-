@@ -65,6 +65,38 @@ object WavUtils {
 
     fun parse(file: File): WavInfo = parse(file.readBytes())
 
+    /**
+     * Inizio e fine (ms) della voce: salta il silenzio iniziale e finale che i motori
+     * di sintesi aggiungono, così i sottotitoli partono insieme alla voce.
+     */
+    fun voiceBounds(bytes: ByteArray, windowMs: Int = 20): Pair<Long, Long> {
+        val info = parse(bytes)
+        if (info.bitsPerSample != 16 || info.byteRate == 0) return 0L to info.durationMs
+        val buf = ByteBuffer.wrap(bytes, info.dataOffset, info.dataSize).order(ByteOrder.LITTLE_ENDIAN)
+        val samplesPerWindow = (info.sampleRate * windowMs / 1000).coerceAtLeast(1) * info.channels
+        val totalSamples = info.dataSize / 2
+        val rms = ArrayList<Double>()
+        var i = 0
+        while (i < totalSamples) {
+            val n = minOf(samplesPerWindow, totalSamples - i)
+            var sum = 0.0
+            for (k in 0 until n) {
+                val v = buf.getShort(info.dataOffset + (i + k) * 2).toDouble()
+                sum += v * v
+            }
+            rms += Math.sqrt(sum / n)
+            i += n
+        }
+        val peak = rms.maxOrNull() ?: return 0L to info.durationMs
+        if (peak < 200) return 0L to info.durationMs // tutto silenzio: nessuna informazione utile
+        val threshold = maxOf(peak * 0.06, 150.0)
+        val first = rms.indexOfFirst { it >= threshold }
+        val last = rms.indexOfLast { it >= threshold }
+        val start = (first.toLong() * windowMs).coerceAtMost(info.durationMs)
+        val end = ((last + 1).toLong() * windowMs).coerceIn(start, info.durationMs)
+        return start to end
+    }
+
     fun durationMs(file: File): Long = parse(file).durationMs
 
     fun header(sampleRate: Int, channels: Int, bitsPerSample: Int, dataSize: Int): ByteArray {

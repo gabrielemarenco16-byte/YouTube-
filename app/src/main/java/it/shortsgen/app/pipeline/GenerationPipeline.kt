@@ -1,6 +1,7 @@
 package it.shortsgen.app.pipeline
 
 import android.content.Context
+import android.media.MediaMetadataRetriever
 import android.util.Log
 import it.shortsgen.app.core.GenerationException
 import it.shortsgen.app.core.Http
@@ -43,6 +44,8 @@ import java.io.File
 class GenerationPipeline(
     private val context: Context,
     private val settings: AppSettings,
+    /** Voce da usare (intercambiabile: nei test si può sostituire). */
+    private val voiceFactory: (Context) -> VoiceProvider = ::AndroidTtsVoiceProvider,
     private val onState: (GenerationState.Running) -> Unit,
 ) {
     private val history = TopicHistory(context)
@@ -113,7 +116,7 @@ class GenerationPipeline(
     private data class VoiceMeta(val rate: Float, val speechMs: List<Long>)
 
     private suspend fun voiceStep(jobDir: File, script: VideoScript): AudioPlan {
-        val voice: VoiceProvider = AndroidTtsVoiceProvider(context)
+        val voice: VoiceProvider = voiceFactory(context)
         val metaFile = File(jobDir, "voice.json")
         try {
             var rate = settings.speechRate
@@ -152,10 +155,21 @@ class GenerationPipeline(
             }
             val timeline = TimelineBuilder.build(
                 script.scenes.mapIndexed { i, scene ->
-                    TimelineBuilder.SceneAudio(scene.narration, speech[i], slots[i])
+                    val bounds = withContext(Dispatchers.IO) {
+                        runCatching { WavUtils.voiceBounds(sceneAudio(jobDir, i).readBytes()) }.getOrNull()
+                    }
+                    TimelineBuilder.SceneAudio(
+                        narration = scene.narration,
+                        speechMs = speech[i],
+                        slotMs = slots[i],
+                        voiceStartMs = bounds?.first ?: 0,
+                        voiceEndMs = bounds?.second ?: speech[i],
+                    )
                 }
             )
             if (timeline.totalMs > 60_000) warnings += "Il video dura ${timeline.totalMs / 1000} secondi (oltre 60)."
+            // Salvata per controllo (sottotitoli e scene con i loro tempi)
+            File(jobDir, "timeline.json").writeText(Http.json.encodeToString(Timeline.serializer(), timeline))
             report(Phase.VOICE, 1f, "Voce pronta (${timeline.totalMs / 1000} secondi)")
             return AudioPlan(narration, timeline)
         } finally {
@@ -236,6 +250,22 @@ class GenerationPipeline(
         }
         if (!output.exists() || output.length() == 0L) {
             throw GenerationException("Il montaggio non ha prodotto nessun file video. Riprova.")
+        }
+        // Controllo finale: il video deve durare quanto la voce (più la pausa finale), senza tagli.
+        val actualMs = runCatching {
+            val r = MediaMetadataRetriever()
+            try {
+                r.setDataSource(output.absolutePath)
+                r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
+            } finally {
+                r.release()
+            }
+        }.getOrNull()
+        val expectedMs = audio.timeline.totalMs
+        if (actualMs != null && actualMs < expectedMs - 300) {
+            val msg = "Il video esportato dura ${actualMs / 1000.0} s invece di ${expectedMs / 1000.0} s: il finale potrebbe essere tagliato."
+            Log.w(TAG, msg)
+            warnings += msg
         }
     }
 

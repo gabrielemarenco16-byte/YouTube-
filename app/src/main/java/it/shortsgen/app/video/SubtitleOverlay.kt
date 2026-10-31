@@ -64,7 +64,8 @@ class SubtitleOverlay(
         val strokeLayout = layout(cue.text, stroke, maxWidth)
         val fillLayout = layout(cue.text, paint, maxWidth)
         canvas.save()
-        canvas.translate((width - maxWidth) / 2f, height * 0.66f - fillLayout.height / 2f)
+        // In basso, sopra la zona coperta dall'interfaccia di YouTube Shorts
+        canvas.translate((width - maxWidth) / 2f, height * BOTTOM_POSITION - fillLayout.height / 2f)
         strokeLayout.draw(canvas)
         fillLayout.draw(canvas)
         canvas.restore()
@@ -76,4 +77,9 @@ class SubtitleOverlay(
             .setLineSpacing(0f, 0.95f)
             .setIncludePad(false)
             .build()
+
+    private companion object {
+        /** Centro verticale dei sottotitoli (0 = alto, 1 = basso). */
+        const val BOTTOM_POSITION = 0.75f
+    }
 }
