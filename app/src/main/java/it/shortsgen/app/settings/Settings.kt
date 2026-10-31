@@ -4,11 +4,15 @@ import android.content.Context
 
 enum class TextProviderType(val label: String) { GEMINI("Gemini"), GROQ("Groq") }
 
-enum class ImageProviderType(val label: String) { GEMINI("Gemini"), CLOUDFLARE("Cloudflare Workers AI") }
+enum class ImageProviderType(val label: String) {
+    POLLINATIONS("Pollinations (gratis, senza chiave)"),
+    CLOUDFLARE("Cloudflare Workers AI"),
+    GEMINI("Gemini"),
+}
 
 data class AppSettings(
     val textProvider: TextProviderType = TextProviderType.GEMINI,
-    val imageProvider: ImageProviderType = ImageProviderType.CLOUDFLARE,
+    val imageProvider: ImageProviderType = ImageProviderType.POLLINATIONS,
     val geminiKey: String = "",
     val groqKey: String = "",
     val cloudflareAccountId: String = "",
@@ -31,6 +35,7 @@ data class AppSettings(
                 if (cloudflareAccountId.isBlank()) add("Account ID Cloudflare")
                 if (cloudflareToken.isBlank()) add("token API Cloudflare")
             }
+            ImageProviderType.POLLINATIONS -> Unit
         }
     }.distinct()
 
@@ -48,7 +53,7 @@ class SettingsRepository(context: Context) {
 
     fun load(): AppSettings = AppSettings(
         textProvider = enumOrDefault(prefs.getString("text_provider", null), TextProviderType.GEMINI),
-        imageProvider = enumOrDefault(prefs.getString("image_provider", null), ImageProviderType.CLOUDFLARE),
+        imageProvider = enumOrDefault(prefs.getString("image_provider", null), ImageProviderType.POLLINATIONS),
         geminiKey = secure.get("gemini_key"),
         groqKey = secure.get("groq_key"),
         cloudflareAccountId = secure.get("cf_account"),

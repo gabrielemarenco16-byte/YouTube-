@@ -12,6 +12,7 @@ import it.shortsgen.app.image.FallbackImageProvider
 import it.shortsgen.app.image.GeminiImageProvider
 import it.shortsgen.app.image.ImageProvider
 import it.shortsgen.app.image.ImageTools
+import it.shortsgen.app.image.PollinationsImageProvider
 import it.shortsgen.app.script.GeminiTextProvider
 import it.shortsgen.app.script.GroqTextProvider
 import it.shortsgen.app.script.Prompts
@@ -174,17 +175,27 @@ class GenerationPipeline(
         settings.cloudflareAccountId, settings.cloudflareToken, settings.cloudflareModel,
     )
 
-    /** Servizio scelto; se esistono anche le chiavi dell'altro, lo usa come riserva. */
+    /**
+     * Servizio scelto, seguito dagli altri configurati come riserva; Pollinations
+     * (senza chiave) è sempre l'ultima riserva.
+     */
     private fun imageProvider(): ImageProvider {
         val hasCloudflare = settings.cloudflareAccountId.isNotBlank() && settings.cloudflareToken.isNotBlank()
         val hasGemini = settings.geminiKey.isNotBlank()
-        val (primary, secondary) = when (settings.imageProvider) {
-            ImageProviderType.GEMINI -> gemini() to (if (hasCloudflare) cloudflare() else null)
-            ImageProviderType.CLOUDFLARE -> cloudflare() to (if (hasGemini) gemini() else null)
+        val chain = buildList {
+            when (settings.imageProvider) {
+                ImageProviderType.CLOUDFLARE -> add(cloudflare())
+                ImageProviderType.GEMINI -> add(gemini())
+                ImageProviderType.POLLINATIONS -> add(PollinationsImageProvider())
+            }
+            if (settings.imageProvider != ImageProviderType.CLOUDFLARE && hasCloudflare) add(cloudflare())
+            if (settings.imageProvider != ImageProviderType.GEMINI && hasGemini) add(gemini())
+            if (settings.imageProvider != ImageProviderType.POLLINATIONS) add(PollinationsImageProvider())
         }
-        if (secondary == null) return primary
-        return FallbackImageProvider(primary, secondary) { reason ->
-            warnings += "${primary.name} non ha funzionato ($reason): immagini create con ${secondary.name}."
+        return chain.reduceRight { primary, rest ->
+            FallbackImageProvider(primary, rest) { reason ->
+                warnings += "${primary.name} non ha funzionato ($reason): uso ${rest.name}."
+            }
         }
     }
 

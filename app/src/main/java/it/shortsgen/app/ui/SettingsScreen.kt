@@ -104,6 +104,10 @@ fun SettingsScreen(onBack: () -> Unit) {
                     ImageProviderType.CLOUDFLARE -> ModelField("Modello Cloudflare", s.cloudflareModel) {
                         s = s.copy(cloudflareModel = it)
                     }
+                    ImageProviderType.POLLINATIONS -> Text(
+                        "Gratis e senza chiave. Può essere lento o avere limiti nelle ore di punta.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                 }
             }
 
@@ -115,7 +119,8 @@ fun SettingsScreen(onBack: () -> Unit) {
                 }
                 SecretField("Cloudflare API Token", s.cloudflareToken) { s = s.copy(cloudflareToken = it) }
                 Text(
-                    "Servono solo le chiavi dei servizi selezionati sopra. Le istruzioni per ottenerle gratis sono nel README.",
+                    "Servono solo le chiavi dei servizi selezionati sopra. Se un servizio di immagini non funziona, " +
+                        "l'app prova da sola gli altri configurati e infine Pollinations (senza chiave).",
                     style = MaterialTheme.typography.bodySmall,
                 )
             }

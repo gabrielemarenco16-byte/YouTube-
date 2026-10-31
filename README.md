@@ -53,7 +53,12 @@ usa Cloudflare. Se un modello viene ritirato (errore 404) l'app chiede a Google 
 
 Modello predefinito: `llama-3.3-70b-versatile` (elenco su <https://console.groq.com/docs/models>).
 
-### Cloudflare Workers AI – immagini (consigliato)
+### Pollinations.ai – immagini senza chiave (predefinito)
+Non serve nessuna registrazione: è già attivo. È gratuito ma può essere lento o avere limiti nelle ore
+di punta. Se un altro servizio di immagini fallisce (chiave non valida o quota finita), l'app usa
+automaticamente Pollinations come ultima riserva.
+
+### Cloudflare Workers AI – immagini (qualità migliore)
 Il piano gratuito include una quota giornaliera che basta per diversi video al giorno.
 1. Registrati su <https://dash.cloudflare.com/sign-up>.
 2. **Account ID**: nella dashboard apri **Workers AI** (menu *AI* → *Workers AI*) oppure guarda nella

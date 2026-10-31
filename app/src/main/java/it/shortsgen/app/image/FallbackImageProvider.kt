@@ -5,7 +5,7 @@ import it.shortsgen.app.core.ErrorMessages
 import it.shortsgen.app.core.GenerationException
 
 /**
- * Usa [primary]; se rifiuta le credenziali (401/403) o il modello non esiste (404),
+ * Usa [primary]; se rifiuta le credenziali (401/403), il modello non esiste (404) o la quota è finita (429),
  * passa definitivamente a [secondary] per il resto del video.
  */
 class FallbackImageProvider(
@@ -31,7 +31,7 @@ class FallbackImageProvider(
 
     companion object {
         fun shouldSwitch(e: Throwable): Boolean = when (e) {
-            is ApiException -> e.code == 401 || e.code == 403 || e.code == 404
+            is ApiException -> e.code == 401 || e.code == 403 || e.code == 404 || e.code == 429
             is GenerationException -> e.cause is ApiException && shouldSwitch(e.cause!!)
             else -> false
         }
