@@ -8,6 +8,7 @@ import it.shortsgen.app.core.GenerationException
 import it.shortsgen.app.core.Http
 import it.shortsgen.app.core.retry
 import it.shortsgen.app.image.CloudflareImageProvider
+import it.shortsgen.app.image.FallbackImageProvider
 import it.shortsgen.app.image.GeminiImageProvider
 import it.shortsgen.app.image.ImageProvider
 import it.shortsgen.app.image.ImageTools
@@ -165,13 +166,26 @@ class GenerationPipeline(
 
     // ---------- 3) Immagini ----------
 
-    private fun imageProvider(): ImageProvider = when (settings.imageProvider) {
-        ImageProviderType.GEMINI -> GeminiImageProvider(settings.geminiKey, settings.geminiImageModel, onModelChanged = { m ->
-            saveSettings { it.copy(geminiImageModel = m) }
-        })
-        ImageProviderType.CLOUDFLARE -> CloudflareImageProvider(
-            settings.cloudflareAccountId, settings.cloudflareToken, settings.cloudflareModel,
-        )
+    private fun gemini(): ImageProvider = GeminiImageProvider(settings.geminiKey, settings.geminiImageModel, onModelChanged = { m ->
+        saveSettings { it.copy(geminiImageModel = m) }
+    })
+
+    private fun cloudflare(): ImageProvider = CloudflareImageProvider(
+        settings.cloudflareAccountId, settings.cloudflareToken, settings.cloudflareModel,
+    )
+
+    /** Servizio scelto; se esistono anche le chiavi dell'altro, lo usa come riserva. */
+    private fun imageProvider(): ImageProvider {
+        val hasCloudflare = settings.cloudflareAccountId.isNotBlank() && settings.cloudflareToken.isNotBlank()
+        val hasGemini = settings.geminiKey.isNotBlank()
+        val (primary, secondary) = when (settings.imageProvider) {
+            ImageProviderType.GEMINI -> gemini() to (if (hasCloudflare) cloudflare() else null)
+            ImageProviderType.CLOUDFLARE -> cloudflare() to (if (hasGemini) gemini() else null)
+        }
+        if (secondary == null) return primary
+        return FallbackImageProvider(primary, secondary) { reason ->
+            warnings += "${primary.name} non ha funzionato ($reason): immagini create con ${secondary.name}."
+        }
     }
 
     private suspend fun imageStep(jobDir: File, script: VideoScript): List<File> {
