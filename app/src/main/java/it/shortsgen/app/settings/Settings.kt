@@ -35,7 +35,7 @@ data class AppSettings(
     }.distinct()
 
     companion object {
-        const val DEFAULT_GEMINI_TEXT_MODEL = "gemini-2.5-flash"
+        const val DEFAULT_GEMINI_TEXT_MODEL = "gemini-flash-latest"
         const val DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
         const val DEFAULT_GEMINI_IMAGE_MODEL = "gemini-2.5-flash-image"
         const val DEFAULT_CLOUDFLARE_MODEL = "@cf/black-forest-labs/flux-1-schnell"
@@ -53,7 +53,9 @@ class SettingsRepository(context: Context) {
         groqKey = secure.get("groq_key"),
         cloudflareAccountId = secure.get("cf_account"),
         cloudflareToken = secure.get("cf_token"),
-        geminiTextModel = prefs.getString("gemini_text_model", null).orDefault(AppSettings.DEFAULT_GEMINI_TEXT_MODEL),
+        geminiTextModel = prefs.getString("gemini_text_model", null)
+            ?.takeUnless { it == "gemini-2.5-flash" } // vecchio predefinito ritirato
+            .orDefault(AppSettings.DEFAULT_GEMINI_TEXT_MODEL),
         groqModel = prefs.getString("groq_model", null).orDefault(AppSettings.DEFAULT_GROQ_MODEL),
         geminiImageModel = prefs.getString("gemini_image_model", null).orDefault(AppSettings.DEFAULT_GEMINI_IMAGE_MODEL),
         cloudflareModel = prefs.getString("cf_model", null).orDefault(AppSettings.DEFAULT_CLOUDFLARE_MODEL),

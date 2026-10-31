@@ -41,10 +41,10 @@ Ti servono **una chiave per il copione** e **una per le immagini**. La combinazi
 2. Premi **"Create API key"** (se richiesto, crea un progetto).
 3. Copia la chiave (inizia con `AIza…`).
 
-Modelli predefiniti nell'app: `gemini-2.5-flash` per il testo e `gemini-2.5-flash-image` per le immagini.
+Modelli predefiniti nell'app: `gemini-flash-latest` (si aggiorna da solo all'ultimo modello Flash) per il testo e `gemini-2.5-flash-image` per le immagini.
 I modelli e i limiti del piano gratuito di Google cambiano spesso: **la generazione di immagini
 con Gemini potrebbe non essere inclusa nel piano gratuito**. Se ricevi errori 429 o 403 sulle immagini,
-usa Cloudflare. Se un modello viene ritirato, scrivi il nome del nuovo modello nelle Impostazioni
+usa Cloudflare. Se un modello viene ritirato (errore 404) l'app chiede a Google l'elenco dei modelli disponibili, sceglie da sola quello più adatto e lo salva nelle Impostazioni; puoi comunque scriverne uno a mano
 (elenco aggiornato su <https://ai.google.dev/gemini-api/docs/models>).
 
 ### Groq – copione (alternativa a Gemini)

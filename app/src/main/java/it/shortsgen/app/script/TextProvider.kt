@@ -25,13 +25,20 @@ interface TextProvider {
 
 class GeminiTextProvider(
     private val apiKey: String,
-    private val model: String,
+    private var model: String,
     private val client: OkHttpClient = Http.client,
     private val baseUrl: String = "https://generativelanguage.googleapis.com",
+    private val onModelChanged: (String) -> Unit = {},
 ) : TextProvider {
     override val name = "Gemini"
 
-    override suspend fun complete(prompt: String): String {
+    override suspend fun complete(prompt: String): String =
+        GeminiModels.withFallback(model, GeminiModels.Kind.TEXT, apiKey, client, baseUrl, onResolved = {
+            model = it
+            onModelChanged(it)
+        }) { m -> request(prompt, m) }
+
+    private suspend fun request(prompt: String, model: String): String {
         val body = buildJsonObject {
             putJsonArray("contents") {
                 addJsonObject {

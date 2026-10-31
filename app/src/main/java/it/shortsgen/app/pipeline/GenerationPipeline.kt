@@ -19,6 +19,7 @@ import it.shortsgen.app.script.TextProvider
 import it.shortsgen.app.script.VideoScript
 import it.shortsgen.app.settings.AppSettings
 import it.shortsgen.app.settings.ImageProviderType
+import it.shortsgen.app.settings.SettingsRepository
 import it.shortsgen.app.settings.TextProviderType
 import it.shortsgen.app.settings.TopicHistory
 import it.shortsgen.app.thumbnail.ThumbnailGenerator
@@ -96,7 +97,9 @@ class GenerationPipeline(
     }
 
     private fun textProvider(): TextProvider = when (settings.textProvider) {
-        TextProviderType.GEMINI -> GeminiTextProvider(settings.geminiKey, settings.geminiTextModel)
+        TextProviderType.GEMINI -> GeminiTextProvider(settings.geminiKey, settings.geminiTextModel, onModelChanged = { m ->
+            saveSettings { it.copy(geminiTextModel = m) }
+        })
         TextProviderType.GROQ -> GroqTextProvider(settings.groqKey, settings.groqModel)
     }
 
@@ -163,7 +166,9 @@ class GenerationPipeline(
     // ---------- 3) Immagini ----------
 
     private fun imageProvider(): ImageProvider = when (settings.imageProvider) {
-        ImageProviderType.GEMINI -> GeminiImageProvider(settings.geminiKey, settings.geminiImageModel)
+        ImageProviderType.GEMINI -> GeminiImageProvider(settings.geminiKey, settings.geminiImageModel, onModelChanged = { m ->
+            saveSettings { it.copy(geminiImageModel = m) }
+        })
         ImageProviderType.CLOUDFLARE -> CloudflareImageProvider(
             settings.cloudflareAccountId, settings.cloudflareToken, settings.cloudflareModel,
         )
@@ -233,6 +238,14 @@ class GenerationPipeline(
         }
         if (!output.exists() || output.length() == 0L) {
             throw GenerationException("Il montaggio non ha prodotto nessun file video. Riprova.")
+        }
+    }
+
+    /** Salva subito il modello scelto automaticamente, così le prossime volte si usa quello. */
+    private fun saveSettings(change: (AppSettings) -> AppSettings) {
+        runCatching {
+            val repo = SettingsRepository(context)
+            repo.save(change(repo.load()))
         }
     }
 

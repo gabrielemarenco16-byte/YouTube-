@@ -4,6 +4,7 @@ import it.shortsgen.app.core.ApiException
 import it.shortsgen.app.core.GenerationException
 import it.shortsgen.app.core.Http
 import it.shortsgen.app.core.executeForString
+import it.shortsgen.app.script.GeminiModels
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -22,29 +23,36 @@ import java.util.Base64
 /** Immagini con l'API Gemini (modelli "image", es. gemini-2.5-flash-image). */
 class GeminiImageProvider(
     private val apiKey: String,
-    private val model: String,
+    private var model: String,
     private val client: OkHttpClient = Http.client,
     private val baseUrl: String = "https://generativelanguage.googleapis.com",
+    private val onModelChanged: (String) -> Unit = {},
 ) : ImageProvider {
     override val name = "Gemini Immagini"
 
     /** Alcuni modelli non accettano imageConfig: dopo un 400 si riprova senza. */
     private var useAspectRatio = true
 
-    override suspend fun generate(prompt: String): ByteArray {
+    override suspend fun generate(prompt: String): ByteArray =
+        GeminiModels.withFallback(model, GeminiModels.Kind.IMAGE, apiKey, client, baseUrl, onResolved = {
+            model = it
+            onModelChanged(it)
+        }) { m -> generateWith(prompt, m) }
+
+    private suspend fun generateWith(prompt: String, model: String): ByteArray {
         return try {
-            request(prompt, useAspectRatio)
+            request(prompt, model, useAspectRatio)
         } catch (e: ApiException) {
-            if (e.code == 400 && useAspectRatio) {
+            if (e.code == 400 && useAspectRatio && !GeminiModels.isModelNotFound(e)) {
                 useAspectRatio = false
-                request(prompt, false)
+                request(prompt, model, false)
             } else {
                 throw e
             }
         }
     }
 
-    private suspend fun request(prompt: String, withAspectRatio: Boolean): ByteArray {
+    private suspend fun request(prompt: String, model: String, withAspectRatio: Boolean): ByteArray {
         val body = buildJsonObject {
             putJsonArray("contents") {
                 addJsonObject {
