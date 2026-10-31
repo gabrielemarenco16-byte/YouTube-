@@ -8,10 +8,13 @@ import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Shader
 import android.graphics.Typeface
+import android.media.MediaMetadataRetriever
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
 import it.shortsgen.app.image.ImageTools
+import it.shortsgen.app.image.MediaKind
+import it.shortsgen.app.image.SceneMedia
 import java.io.File
 
 /** Copertina 1280x720 con l'immagine della prima scena e il titolo in grande. */
@@ -19,12 +22,12 @@ object ThumbnailGenerator {
     const val WIDTH = 1280
     const val HEIGHT = 720
 
-    fun create(sourceImage: File?, title: String, output: File) {
-        val background = sourceImage?.takeIf { it.exists() }?.let { BitmapFactory.decodeFile(it.absolutePath) }
+    fun create(source: SceneMedia?, title: String, output: File) {
+        val background = source?.takeIf { it.file.exists() }?.let { loadFrame(it) }
         val bmp = if (background != null) {
             ImageTools.centerCrop(background, WIDTH, HEIGHT).also { background.recycle() }
         } else {
-            ImageTools.placeholder(0, "", WIDTH, HEIGHT)
+            ImageTools.placeholder(0, WIDTH, HEIGHT)
         }
         val canvas = Canvas(bmp)
 
@@ -75,6 +78,21 @@ object ThumbnailGenerator {
         ImageTools.saveJpeg(bmp, output, quality = 90)
         bmp.recycle()
     }
+
+    /** Prima scena: l'immagine, oppure un fotogramma a 1 secondo della clip video. */
+    private fun loadFrame(media: SceneMedia): Bitmap? = runCatching {
+        if (media.kind == MediaKind.VIDEO) {
+            val retriever = MediaMetadataRetriever()
+            try {
+                retriever.setDataSource(media.path)
+                retriever.getFrameAtTime(1_000_000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+            } finally {
+                retriever.release()
+            }
+        } else {
+            BitmapFactory.decodeFile(media.path)
+        }
+    }.getOrNull()
 
     private fun build(text: String, paint: TextPaint, width: Int): StaticLayout =
         StaticLayout.Builder.obtain(text, 0, text.length, paint, width)

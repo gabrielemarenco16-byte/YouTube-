@@ -98,29 +98,28 @@ fun SettingsScreen(onBack: () -> Unit) {
                     RadioRow(type.label, selected = s.imageProvider == type) { s = s.copy(imageProvider = type) }
                 }
                 when (s.imageProvider) {
-                    ImageProviderType.GEMINI -> ModelField("Modello Gemini (immagini)", s.geminiImageModel) {
-                        s = s.copy(geminiImageModel = it)
-                    }
+                    ImageProviderType.PEXELS -> Text(
+                        "Clip video verticali e foto gratuite. Se Pexels non trova nulla, e Cloudflare è configurato, " +
+                            "l'app prova Cloudflare.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                     ImageProviderType.CLOUDFLARE -> ModelField("Modello Cloudflare", s.cloudflareModel) {
                         s = s.copy(cloudflareModel = it)
                     }
-                    ImageProviderType.POLLINATIONS -> Text(
-                        "Gratis e senza chiave. Può essere lento o avere limiti nelle ore di punta.",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
                 }
             }
 
             Section("Chiavi API (salvate cifrate sul telefono)") {
-                SecretField("Chiave API Gemini", s.geminiKey) { s = s.copy(geminiKey = it) }
-                SecretField("Chiave API Groq", s.groqKey) { s = s.copy(groqKey = it) }
-                SecretField("Cloudflare Account ID", s.cloudflareAccountId, secret = false) {
+                SecretField("GEMINI_API_KEY – chiave Gemini", s.geminiKey) { s = s.copy(geminiKey = it) }
+                SecretField("GROQ_API_KEY – chiave Groq", s.groqKey) { s = s.copy(groqKey = it) }
+                SecretField("PEXELS_API_KEY – chiave Pexels", s.pexelsKey) { s = s.copy(pexelsKey = it) }
+                SecretField("CF_ACCOUNT_ID – Account ID Cloudflare", s.cloudflareAccountId, secret = false) {
                     s = s.copy(cloudflareAccountId = it)
                 }
-                SecretField("Cloudflare API Token", s.cloudflareToken) { s = s.copy(cloudflareToken = it) }
+                SecretField("CF_API_TOKEN – token Cloudflare", s.cloudflareToken) { s = s.copy(cloudflareToken = it) }
                 Text(
-                    "Servono solo le chiavi dei servizi selezionati sopra. Se un servizio di immagini non funziona, " +
-                        "l'app prova da sola gli altri configurati e infine Pollinations (senza chiave).",
+                    "Servono solo le chiavi dei servizi selezionati sopra. Le chiavi restano cifrate su questo telefono " +
+                        "e non sono mai scritte nel codice dell'app.",
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
@@ -147,7 +146,6 @@ fun SettingsScreen(onBack: () -> Unit) {
                 s = s.copy(
                     geminiTextModel = AppSettings.DEFAULT_GEMINI_TEXT_MODEL,
                     groqModel = AppSettings.DEFAULT_GROQ_MODEL,
-                    geminiImageModel = AppSettings.DEFAULT_GEMINI_IMAGE_MODEL,
                     cloudflareModel = AppSettings.DEFAULT_CLOUDFLARE_MODEL,
                 )
             }) { Text("Ripristina modelli predefiniti") }

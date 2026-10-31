@@ -33,7 +33,8 @@ import java.io.File
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
-data class SceneVisual(val image: File, val durationMs: Long)
+/** Contenuto visivo di una scena: un'immagine oppure una clip video (tagliata a [durationMs]). */
+data class SceneVisual(val file: File, val durationMs: Long, val isVideo: Boolean = false)
 
 /** Montaggio del video finale con Media3 Transformer. */
 @OptIn(UnstableApi::class)
@@ -94,27 +95,38 @@ class VideoComposer(private val context: Context) {
     ): Composition {
         val videoItems = scenes.mapIndexed { i, scene ->
             val durationUs = scene.durationMs * 1000
-            val mediaItem = MediaItem.Builder()
-                .setUri(Uri.fromFile(scene.image))
-                .setMimeType(MimeTypes.IMAGE_JPEG)
-                .setImageDurationMs(scene.durationMs)
-                .build()
-            val effects = listOf<Effect>(
-                Presentation.createForWidthAndHeight(
-                    ImageTools.VIDEO_WIDTH, ImageTools.VIDEO_HEIGHT, Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP,
-                ),
-                KenBurnsEffect(durationUs, zoomIn = i % 2 == 0),
-                FadeEffect(
-                    durationUs,
-                    fadeInUs = if (i == 0) 0 else FADE_US,
-                    fadeOutUs = if (i == scenes.lastIndex) FADE_US * 2 else FADE_US,
-                ),
+            val fade = FadeEffect(
+                durationUs,
+                fadeInUs = if (i == 0) 0 else FADE_US,
+                fadeOutUs = if (i == scenes.lastIndex) FADE_US * 2 else FADE_US,
             )
-            EditedMediaItem.Builder(mediaItem)
-                .setDurationUs(durationUs)
-                .setFrameRate(FRAME_RATE)
-                .setEffects(Effects(emptyList(), effects))
-                .build()
+            // Ritaglio al centro in 9:16 e ridimensionamento a 1080x1920
+            val crop = Presentation.createForWidthAndHeight(
+                ImageTools.VIDEO_WIDTH, ImageTools.VIDEO_HEIGHT, Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP,
+            )
+            if (scene.isVideo) {
+                val mediaItem = MediaItem.Builder()
+                    .setUri(Uri.fromFile(scene.file))
+                    .setClippingConfiguration(
+                        MediaItem.ClippingConfiguration.Builder().setEndPositionMs(scene.durationMs).build()
+                    )
+                    .build()
+                EditedMediaItem.Builder(mediaItem)
+                    .setRemoveAudio(true) // l'unico audio è la voce narrante
+                    .setEffects(Effects(emptyList(), listOf<Effect>(crop, fade)))
+                    .build()
+            } else {
+                val mediaItem = MediaItem.Builder()
+                    .setUri(Uri.fromFile(scene.file))
+                    .setMimeType(MimeTypes.IMAGE_JPEG)
+                    .setImageDurationMs(scene.durationMs)
+                    .build()
+                EditedMediaItem.Builder(mediaItem)
+                    .setDurationUs(durationUs)
+                    .setFrameRate(FRAME_RATE)
+                    .setEffects(Effects(emptyList(), listOf<Effect>(crop, KenBurnsEffect(durationUs, zoomIn = i % 2 == 0), fade)))
+                    .build()
+            }
         }
         val sequences = mutableListOf(EditedMediaItemSequence.Builder(videoItems).build())
         if (includeAudio) sequences += EditedMediaItemSequence.Builder(listOf(audioItem(audio))).build()

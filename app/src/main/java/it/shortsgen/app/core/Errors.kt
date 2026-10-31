@@ -6,10 +6,13 @@ import java.net.UnknownHostException
 import kotlin.coroutines.cancellation.CancellationException
 
 /** Errore con un messaggio già pronto da mostrare all'utente (in italiano). */
-class GenerationException(
+open class GenerationException(
     val userMessage: String,
     cause: Throwable? = null,
 ) : Exception(userMessage, cause)
+
+/** Chiave o credenziale mancante: [variable] è il nome da controllare (es. PEXELS_API_KEY). */
+class MissingKeyException(val variable: String, userMessage: String) : GenerationException(userMessage)
 
 /** Risposta HTTP non riuscita da un servizio esterno. */
 class ApiException(
@@ -39,11 +42,24 @@ object ErrorMessages {
         }
     }
 
+    /** Nome della variabile (campo nelle Impostazioni) che contiene la chiave di ogni servizio. */
+    val KEY_VARIABLES = mapOf(
+        "Gemini" to "GEMINI_API_KEY",
+        "Groq" to "GROQ_API_KEY",
+        "Pexels" to "PEXELS_API_KEY",
+        "Cloudflare" to "CF_ACCOUNT_ID / CF_API_TOKEN",
+    )
+
+    fun keyVariable(provider: String): String =
+        KEY_VARIABLES.entries.firstOrNull { provider.startsWith(it.key) }?.value ?: "la chiave di $provider"
+
     fun apiMessage(e: ApiException): String = when (e.code) {
         400 -> "${e.provider}: richiesta rifiutata (400). Controlla il nome del modello nelle Impostazioni. Dettaglio: ${shortDetail(e.body)}"
-        401, 403 -> "${e.provider}: chiave API non valida o senza permessi (${e.code}). Controllala nelle Impostazioni. Dettaglio: ${shortDetail(e.body)}"
+        401, 403 -> "${e.provider}: chiave mancante o non valida (${e.code}). Controlla ${keyVariable(e.provider)} " +
+            "nelle Impostazioni. Dettaglio: ${shortDetail(e.body)}"
         404 -> "${e.provider}: modello o indirizzo non trovato (404). Controlla il nome del modello nelle Impostazioni. Dettaglio: ${shortDetail(e.body)}"
-        429 -> "${e.provider}: limite di richieste gratuite raggiunto (429). Aspetta qualche minuto e riprova."
+        429 -> "${e.provider}: limite di richieste gratuite raggiunto (429). Aspetta qualche minuto e riprova " +
+            "(oppure controlla il piano associato a ${keyVariable(e.provider)})."
         in 500..599 -> "${e.provider}: il servizio ha un problema temporaneo (${e.code}). Riprova più tardi."
         else -> "${e.provider}: errore HTTP ${e.code}. ${shortDetail(e.body)}"
     }

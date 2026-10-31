@@ -1,18 +1,19 @@
 package it.shortsgen.app.pipeline
 
 import android.content.Context
-import android.graphics.Bitmap
 import android.util.Log
-import it.shortsgen.app.core.ErrorMessages
 import it.shortsgen.app.core.GenerationException
 import it.shortsgen.app.core.Http
 import it.shortsgen.app.core.retry
-import it.shortsgen.app.image.CloudflareImageProvider
-import it.shortsgen.app.image.FallbackImageProvider
-import it.shortsgen.app.image.GeminiImageProvider
+import it.shortsgen.app.image.CloudflareProvider
 import it.shortsgen.app.image.ImageProvider
+import it.shortsgen.app.image.KeywordExtractor
+import it.shortsgen.app.image.MediaCollector
+import it.shortsgen.app.image.MediaKind
+import it.shortsgen.app.image.MediaRequest
+import it.shortsgen.app.image.PexelsProvider
+import it.shortsgen.app.image.SceneMedia
 import it.shortsgen.app.image.ImageTools
-import it.shortsgen.app.image.PollinationsImageProvider
 import it.shortsgen.app.script.GeminiTextProvider
 import it.shortsgen.app.script.GroqTextProvider
 import it.shortsgen.app.script.Prompts
@@ -34,7 +35,6 @@ import it.shortsgen.app.voice.AndroidTtsVoiceProvider
 import it.shortsgen.app.voice.VoiceProvider
 import it.shortsgen.app.voice.WavUtils
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import java.io.File
@@ -59,12 +59,12 @@ class GenerationPipeline(
     suspend fun run(jobDir: File): GenerationResult {
         val script = scriptStep(jobDir)
         val audio = voiceStep(jobDir, script)
-        val images = imageStep(jobDir, script)
+        val media = mediaStep(jobDir, script, audio.timeline)
         val video = File(jobDir, "short.mp4")
-        videoStep(images, audio, video)
+        videoStep(media, audio, video)
         val thumbnail = File(jobDir, "thumbnail.jpg")
         report(Phase.THUMBNAIL, 0f, "Disegno la copertina…")
-        withContext(Dispatchers.Default) { ThumbnailGenerator.create(images.firstOrNull(), script.title, thumbnail) }
+        withContext(Dispatchers.Default) { ThumbnailGenerator.create(media.firstOrNull(), script.title, thumbnail) }
         report(Phase.THUMBNAIL, 1f, "Fatto!")
         return GenerationResult(
             jobDir = jobDir.absolutePath,
@@ -165,108 +165,72 @@ class GenerationPipeline(
 
     private fun sceneAudio(jobDir: File, index: Int) = File(jobDir, "voice_${index + 1}.wav")
 
-    // ---------- 3) Immagini ----------
+    // ---------- 3) Immagini e video ----------
 
-    private fun gemini(): ImageProvider = GeminiImageProvider(settings.geminiKey, settings.geminiImageModel, onModelChanged = { m ->
-        saveSettings { it.copy(geminiImageModel = m) }
-    })
-
-    private fun pollinations(): ImageProvider = PollinationsImageProvider(onWait = { sec ->
-        report(Phase.IMAGES, imagesProgress, "Limite gratuito di Pollinations: aspetto $sec secondi…")
-    })
-
-    /** Avanzamento corrente della fase immagini (per i messaggi di attesa). */
-    @Volatile
-    private var imagesProgress = 0f
-
-    private fun cloudflare(): ImageProvider = CloudflareImageProvider(
-        settings.cloudflareAccountId, settings.cloudflareToken, settings.cloudflareModel,
-    )
-
-    /**
-     * Servizio scelto, seguito dagli altri configurati come riserva; Pollinations
-     * (senza chiave) è sempre l'ultima riserva.
-     */
-    private fun imageProvider(): ImageProvider {
+    /** Provider scelto nelle Impostazioni, poi l'altro (se configurato) come riserva. */
+    private fun imageProviders(): List<ImageProvider> {
+        val pexels = PexelsProvider(settings.pexelsKey)
+        val cloudflare = CloudflareProvider(settings.cloudflareAccountId, settings.cloudflareToken, settings.cloudflareModel)
+        val hasPexels = settings.pexelsKey.isNotBlank()
         val hasCloudflare = settings.cloudflareAccountId.isNotBlank() && settings.cloudflareToken.isNotBlank()
-        val hasGemini = settings.geminiKey.isNotBlank()
-        val chain = buildList {
-            when (settings.imageProvider) {
-                ImageProviderType.CLOUDFLARE -> add(cloudflare())
-                ImageProviderType.GEMINI -> add(gemini())
-                ImageProviderType.POLLINATIONS -> add(pollinations())
-            }
-            if (settings.imageProvider != ImageProviderType.CLOUDFLARE && hasCloudflare) add(cloudflare())
-            if (settings.imageProvider != ImageProviderType.GEMINI && hasGemini) add(gemini())
-            if (settings.imageProvider != ImageProviderType.POLLINATIONS) add(pollinations())
-        }
-        return chain.reduceRight { primary, rest ->
-            FallbackImageProvider(primary, rest) { reason ->
-                warnings += "${primary.name} non ha funzionato ($reason): uso ${rest.name}."
-            }
+        return when (settings.imageProvider) {
+            ImageProviderType.PEXELS -> listOfNotNull(pexels, cloudflare.takeIf { hasCloudflare })
+            ImageProviderType.CLOUDFLARE -> listOfNotNull(cloudflare, pexels.takeIf { hasPexels })
         }
     }
 
-    private suspend fun imageStep(jobDir: File, script: VideoScript): List<File> {
-        val provider = imageProvider()
-        val files = ArrayList<File>()
-        var failures = 0
-        var firstError: Throwable? = null
-        script.scenes.forEachIndexed { i, scene ->
-            val file = File(jobDir, "image_${i + 1}.jpg")
-            files += file
-            // il file ".placeholder" indica un segnaposto: con "Riprova" si tenta di nuovo
-            val marker = File(jobDir, "image_${i + 1}.placeholder")
-            if (file.exists() && file.length() > 0 && !marker.exists()) return@forEachIndexed
-            imagesProgress = i.toFloat() / script.scenes.size
-            report(Phase.IMAGES, i.toFloat() / script.scenes.size, "Creo l'immagine ${i + 1} di ${script.scenes.size} con ${provider.name}…")
-            val bitmap: Bitmap? = try {
-                retry(times = 3, initialDelayMs = 3000, shouldRetry = ::isImageErrorRetryable, onRetry = { attempt, _ ->
-                    report(Phase.IMAGES, i.toFloat() / script.scenes.size, "Immagine ${i + 1}: nuovo tentativo ($attempt)…")
-                }) {
-                    val bytes = provider.generate(Prompts.imagePrompt(scene.imagePrompt))
-                    withContext(Dispatchers.Default) { ImageTools.decode(bytes) }
-                        ?: throw GenerationException("Immagine ricevuta non valida")
-                }
-            } catch (e: kotlin.coroutines.cancellation.CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Log.w(TAG, "Immagine ${i + 1} non generata", e)
-                failures++
-                if (firstError == null) firstError = e
-                null
-            }
-            withContext(Dispatchers.Default) {
-                val frame = if (bitmap != null) {
-                    ImageTools.centerCrop(bitmap, ImageTools.VIDEO_WIDTH, ImageTools.VIDEO_HEIGHT).also { bitmap.recycle() }
-                } else {
-                    ImageTools.placeholder(i, ImageTools.placeholderLabel(scene.narration))
-                }
-                ImageTools.saveJpeg(frame, file)
-                frame.recycle()
-            }
-            if (bitmap == null) marker.createNewFile() else marker.delete()
-            // piccola pausa per rispettare i limiti delle API gratuite
-            if (i < script.scenes.lastIndex) delay(800)
+    @Serializable
+    private data class MediaManifest(val media: List<SceneMedia>)
+
+    private suspend fun mediaStep(jobDir: File, script: VideoScript, timeline: Timeline): List<SceneMedia> {
+        val manifestFile = File(jobDir, "media.json")
+        val existing = runCatching {
+            Http.json.decodeFromString(MediaManifest.serializer(), manifestFile.readText()).media
+        }.getOrDefault(emptyList())
+
+        val requests = script.scenes.mapIndexed { i, scene ->
+            MediaRequest(
+                sceneIndex = i,
+                queries = KeywordExtractor.queries(scene.searchQuery, scene.imagePrompt, scene.narration, script.topic),
+                prompt = Prompts.imagePrompt(scene.imagePrompt),
+                minDurationMs = timeline.scenes[i].durationMs,
+            )
         }
-        if (failures > 0) {
-            val reason = firstError?.let { ErrorMessages.toItalian(it, Phase.IMAGES.label) } ?: ""
-            warnings += "$failures immagini su ${script.scenes.size} sostituite da un segnaposto. $reason"
-            // Se nessuna immagine è riuscita è quasi sempre un problema di chiave/limiti: meglio fermarsi.
-            if (failures == script.scenes.size) {
-                files.forEach { it.delete() }
-                throw GenerationException("Nessuna immagine generata. $reason")
-            }
+        val collector = MediaCollector(
+            providers = imageProviders(),
+            placeholder = { index, dir ->
+                withContext(Dispatchers.Default) {
+                    val file = File(dir, "scene_${index + 1}.jpg")
+                    val bmp = ImageTools.placeholder(index)
+                    ImageTools.saveJpeg(bmp, file)
+                    bmp.recycle()
+                    SceneMedia(MediaKind.IMAGE, file.absolutePath, "segnaposto", "placeholder-$index", placeholder = true)
+                }
+            },
+            log = { Log.w(TAG, it) },
+            onStatus = { i, text -> report(Phase.IMAGES, i.toFloat() / script.scenes.size, text) },
+        )
+        val result = collector.collect(requests, jobDir, existing)
+        manifestFile.writeText(Http.json.encodeToString(MediaManifest.serializer(), MediaManifest(result.media)))
+        warnings += result.warnings
+
+        if (result.placeholderCount == script.scenes.size) {
+            // Nessuna scena riuscita: quasi sempre chiave mancante o non valida. Meglio fermarsi.
+            throw GenerationException("Nessuna immagine o video trovato. ${result.warnings.firstOrNull().orEmpty()}")
         }
-        report(Phase.IMAGES, 1f, "Immagini pronte")
-        return files
+        val videos = result.media.count { it.kind == MediaKind.VIDEO && !it.placeholder }
+        report(Phase.IMAGES, 1f, "Pronte ${result.media.size} scene ($videos clip video)")
+        return result.media
     }
 
     // ---------- 4) Montaggio ----------
 
-    private suspend fun videoStep(images: List<File>, audio: AudioPlan, output: File) {
+    private suspend fun videoStep(media: List<SceneMedia>, audio: AudioPlan, output: File) {
         report(Phase.VIDEO, 0f, "Monto il video…")
-        val visuals = audio.timeline.scenes.map { slot -> SceneVisual(images[slot.index], slot.durationMs) }
+        val visuals = audio.timeline.scenes.map { slot ->
+            val m = media[slot.index]
+            SceneVisual(m.file, slot.durationMs, isVideo = m.kind == MediaKind.VIDEO)
+        }
         VideoComposer(context).compose(visuals, audio.narration, audio.timeline.cues, output) { p ->
             report(Phase.VIDEO, p, "Monto il video… ${(p * 100).toInt()}%")
         }
@@ -282,10 +246,6 @@ class GenerationPipeline(
             repo.save(change(repo.load()))
         }
     }
-
-    private fun isImageErrorRetryable(e: Throwable): Boolean =
-        e !is kotlin.coroutines.cancellation.CancellationException &&
-            (e is GenerationException || ErrorMessages.isRetryable(e))
 
     private companion object {
         const val TAG = "GenerationPipeline"

@@ -33,7 +33,8 @@ object ScriptParser {
             val s = el as? JsonObject ?: return@mapNotNull null
             val narration = (s.string("narration") ?: s.string("text"))?.let(::cleanNarration).orEmpty()
             val prompt = (s.string("image_prompt") ?: s.string("imagePrompt") ?: s.string("image"))?.trim().orEmpty()
-            if (narration.isEmpty()) null else Scene(narration, prompt.ifEmpty { narration })
+            val query = (s.string("search_query") ?: s.string("searchQuery") ?: s.string("keywords"))?.trim().orEmpty()
+            if (narration.isEmpty()) null else Scene(narration, prompt.ifEmpty { narration }, query)
         }
         if (scenes.size < MIN_SCENES) {
             throw GenerationException("Il copione generato ha solo ${scenes.size} scene valide (servono $SCENE_COUNT).")

@@ -9,10 +9,6 @@ import android.graphics.Paint
 import android.graphics.RadialGradient
 import android.graphics.Rect
 import android.graphics.Shader
-import android.graphics.Typeface
-import android.text.Layout
-import android.text.StaticLayout
-import android.text.TextPaint
 import java.io.File
 import java.io.FileOutputStream
 
@@ -68,8 +64,11 @@ object ImageTools {
         intArrayOf(0xFF1C1917.toInt(), 0xFFCA8A04.toInt()),
     )
 
-    /** Immagine segnaposto (gradiente + parola chiave) usata se la generazione fallisce. */
-    fun placeholder(index: Int, label: String, width: Int = VIDEO_WIDTH, height: Int = VIDEO_HEIGHT): Bitmap {
+    /**
+     * Immagine segnaposto usata solo se tutti i servizi falliscono: un gradiente
+     * senza testo (i soli testi a schermo devono essere i sottotitoli).
+     */
+    fun placeholder(index: Int, width: Int = VIDEO_WIDTH, height: Int = VIDEO_HEIGHT): Bitmap {
         val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
         val colors = PALETTES[index % PALETTES.size]
@@ -84,30 +83,6 @@ object ImageTools {
             )
         }
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), glow)
-
-        val text = label.trim().ifEmpty { "?" }
-        val paint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.WHITE
-            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-            textSize = width * 0.075f
-            setShadowLayer(12f, 0f, 4f, Color.argb(160, 0, 0, 0))
-        }
-        val layoutWidth = (width * 0.8f).toInt()
-        val layout = StaticLayout.Builder.obtain(text, 0, text.length, paint, layoutWidth)
-            .setAlignment(Layout.Alignment.ALIGN_CENTER)
-            .setMaxLines(4)
-            .setEllipsize(android.text.TextUtils.TruncateAt.END)
-            .build()
-        canvas.save()
-        canvas.translate((width - layoutWidth) / 2f, height * 0.38f - layout.height / 2f)
-        layout.draw(canvas)
-        canvas.restore()
         return bmp
-    }
-
-    /** Parole significative della narrazione da mostrare sul segnaposto. */
-    fun placeholderLabel(narration: String): String {
-        val words = narration.split(Regex("\\s+")).map { it.trim(',', '.', '!', '?', ';', ':', '"') }
-        return words.filter { it.length > 3 }.take(4).joinToString(" ").ifEmpty { narration.take(40) }
     }
 }
