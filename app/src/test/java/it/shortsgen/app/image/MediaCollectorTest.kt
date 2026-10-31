@@ -94,4 +94,14 @@ class MediaCollectorTest {
         assertEquals("old", result.media[0].sourceId)
         assertEquals(1, provider.calls)
     }
+
+    @Test
+    fun everyPlaceholderWarningNamesTheRealCause() = runTest {
+        val pexels = Fake("Pexels", { _: Int -> MissingKeyException("PEXELS_API_KEY", "Chiave Pexels mancante: inserisci PEXELS_API_KEY") })
+        val result = collector(pexels).collect(requests(3), tmp.root)
+        assertEquals(3, result.placeholderCount)
+        val sceneWarnings = result.warnings.filter { it.startsWith("ATTENZIONE") }
+        assertEquals(3, sceneWarnings.size)
+        assertTrue(sceneWarnings.all { it.contains("PEXELS_API_KEY") })
+    }
 }

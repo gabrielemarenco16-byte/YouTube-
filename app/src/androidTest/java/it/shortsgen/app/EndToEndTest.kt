@@ -53,7 +53,8 @@ class EndToEndTest {
     @Test
     fun generateVideoAndInspectFrames() = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val out = File(context.getExternalFilesDir(null), "e2e").apply { deleteRecursively(); mkdirs() }
+        // cartella interna: lo script la recupera con "run-as" (funziona sulle app di debug)
+        val out = File(context.filesDir, "e2e_out").apply { deleteRecursively(); mkdirs() }
         val job = File(context.filesDir, "e2e_job").apply { deleteRecursively(); mkdirs() }
         val report = StringBuilder()
         fun line(text: String) {

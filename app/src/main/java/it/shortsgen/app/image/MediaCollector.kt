@@ -30,7 +30,8 @@ class MediaCollector(
     suspend fun collect(requests: List<MediaRequest>, dir: File, existing: List<SceneMedia?> = emptyList()): Result {
         val usedIds = mutableSetOf<String>()
         val warnings = mutableListOf<String>()
-        val disabled = mutableSetOf<String>()
+        /** Provider esclusi (chiave mancante o rifiutata) con il motivo. */
+        val disabled = mutableMapOf<String, String>()
         val media = ArrayList<SceneMedia>()
 
         requests.forEachIndexed { i, request ->
@@ -43,7 +44,11 @@ class MediaCollector(
             var found: SceneMedia? = null
             val errors = mutableListOf<String>()
             for (provider in providers) {
-                if (provider.name in disabled) continue
+                val disabledReason = disabled[provider.name]
+                if (disabledReason != null) {
+                    errors += disabledReason
+                    continue
+                }
                 onStatus(i, "Scena ${i + 1} di ${requests.size}: cerco con ${provider.name}…")
                 try {
                     found = retry(
@@ -64,7 +69,7 @@ class MediaCollector(
                     log("Scena ${i + 1}: ${provider.name} non disponibile: $message")
                     if (isConfigError(e)) {
                         // chiave mancante o rifiutata: inutile riprovarla nelle scene successive
-                        disabled += provider.name
+                        disabled[provider.name] = message
                         warnings += message
                     }
                 }

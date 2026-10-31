@@ -21,7 +21,8 @@ adb shell am instrument -w -r \
   it.shortsgen.app.test/androidx.test.runner.AndroidJUnitRunner > e2e-out/instrument.txt 2>&1
 cat e2e-out/instrument.txt | tail -60
 
-adb pull /sdcard/Android/data/it.shortsgen.app/files/e2e/. e2e-out/ || true
+adb exec-out run-as it.shortsgen.app tar -cf - -C files e2e_out > e2e-out.tar || true
+tar -xf e2e-out.tar -C e2e-out --strip-components=1 || echo "Impossibile estrarre i risultati dal dispositivo"
 adb logcat -d -v time -s EndToEndTest:* GenerationPipeline:* PexelsProvider:* VideoComposer:* AndroidRuntime:* TransformerInternal:* > e2e-out/logcat.txt || true
 ls -la e2e-out
 echo "----- report -----"
