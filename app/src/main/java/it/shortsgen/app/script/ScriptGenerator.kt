@@ -17,7 +17,7 @@ class ScriptGenerator(
         repeat(3) { round ->
             val prompt = Prompts.scriptPrompt(used, random.nextInt(0, 10_000))
             // anche un JSON non valido (GenerationException) merita un nuovo tentativo
-            val script = retry(times = 3, shouldRetry = { it is GenerationException || ErrorMessages.isRetryable(it) }, onRetry = { attempt, _ ->
+            val script = retry(times = 4, initialDelayMs = 4000, shouldRetry = { it is GenerationException || ErrorMessages.isRetryable(it) }, onRetry = { attempt, _ ->
                 onStatus("Nuovo tentativo con ${provider.name} ($attempt)…")
             }) {
                 ScriptParser.parse(provider.complete(prompt))

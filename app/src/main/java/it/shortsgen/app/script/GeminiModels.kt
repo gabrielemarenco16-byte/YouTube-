@@ -28,6 +28,10 @@ object GeminiModels {
         return e.code == 400 && ("not found" in body || "is not supported" in body || "no longer available" in body)
     }
 
+    /** Errori legati al singolo modello (sovraccarico o quota esaurita): un altro modello può funzionare. */
+    fun isModelBusy(e: Throwable): Boolean =
+        e is ApiException && (e.code == 429 || e.code == 500 || e.code == 503)
+
     suspend fun listModels(apiKey: String, client: OkHttpClient, baseUrl: String): List<String> {
         val request = Request.Builder()
             .url("$baseUrl/v1beta/models?pageSize=1000")
@@ -93,14 +97,19 @@ object GeminiModels {
         onResolved: (String) -> Unit,
         call: suspend (model: String) -> T,
     ): T {
-        try {
+        val firstError: ApiException = try {
             return call(configured)
         } catch (e: ApiException) {
-            if (!isModelNotFound(e)) throw e
+            if (!isModelNotFound(e) && !isModelBusy(e)) throw e
+            e
         }
+        // Solo se il modello non esiste più lo sostituiamo nelle Impostazioni;
+        // se è solo sovraccarico lo usiamo ancora la prossima volta.
+        val permanent = isModelNotFound(firstError)
         val available = listModels(apiKey, client, baseUrl)
         val candidates = rank(available.filter { it != configured.trim() }, kind).take(MAX_ATTEMPTS)
         if (candidates.isEmpty()) {
+            if (!permanent) throw firstError
             throw GenerationException(
                 if (kind == Kind.IMAGE) {
                     "La tua chiave Gemini non ha accesso a nessun modello per creare immagini. " +
@@ -112,21 +121,23 @@ object GeminiModels {
             )
         }
         val tried = mutableListOf(configured.trim())
-        var lastError: ApiException? = null
+        var lastError: ApiException = firstError
         for (candidate in candidates) {
             try {
                 val result = call(candidate)
-                onResolved(candidate)
+                if (permanent) onResolved(candidate)
                 return result
             } catch (e: ApiException) {
-                if (!isModelNotFound(e)) throw e
+                if (!isModelNotFound(e) && !isModelBusy(e)) throw e
                 tried += candidate
                 lastError = e
             }
         }
+        // Tutti sovraccarichi/senza quota: restituiamo l'errore originale (es. 503 → "riprova più tardi").
+        if (!permanent || isModelBusy(lastError)) throw lastError
         throw GenerationException(
             "Nessun modello Gemini funziona con la tua chiave (provati: ${tried.joinToString(", ")}). " +
-                "Dettaglio di Google: ${lastError?.let { ErrorMessages.apiMessage(it) } ?: "-"}",
+                "Dettaglio di Google: ${ErrorMessages.apiMessage(lastError)}",
             lastError,
         )
     }

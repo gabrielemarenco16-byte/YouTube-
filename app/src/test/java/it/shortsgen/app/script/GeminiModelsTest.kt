@@ -99,4 +99,44 @@ class GeminiModelsTest {
             server.shutdown()
         }
     }
+
+    @Test
+    fun overloadedModelUsesAnotherOneWithoutSavingIt() = runTest {
+        val server = MockWebServer()
+        server.start()
+        try {
+            server.enqueue(MockResponse().setResponseCode(503).setBody("""{"error":{"message":"The model is overloaded"}}"""))
+            server.enqueue(MockResponse().setBody(listJson))
+            server.enqueue(MockResponse().setBody("""{"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}"""))
+            var saved: String? = null
+            val provider = GeminiTextProvider(
+                "K", "gemini-flash-latest", OkHttpClient(), server.url("/").toString().trimEnd('/'),
+                onModelChanged = { saved = it },
+            )
+            assertEquals("ok", provider.complete("x"))
+            assertNull(saved)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun allOverloadedRethrowsOriginal503() = runTest {
+        val server = MockWebServer()
+        server.start()
+        try {
+            server.enqueue(MockResponse().setResponseCode(503).setBody("{}"))
+            server.enqueue(MockResponse().setBody("""{"models":[{"name":"models/gemini-3.0-flash","supportedGenerationMethods":["generateContent"]}]}"""))
+            server.enqueue(MockResponse().setResponseCode(503).setBody("{}"))
+            val provider = GeminiTextProvider("K", "gemini-flash-latest", OkHttpClient(), server.url("/").toString().trimEnd('/'))
+            try {
+                provider.complete("x")
+                org.junit.Assert.fail()
+            } catch (e: ApiException) {
+                assertEquals(503, e.code)
+            }
+        } finally {
+            server.shutdown()
+        }
+    }
 }
