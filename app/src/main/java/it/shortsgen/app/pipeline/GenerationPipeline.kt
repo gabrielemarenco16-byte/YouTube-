@@ -177,7 +177,9 @@ class GenerationPipeline(
         script.scenes.forEachIndexed { i, scene ->
             val file = File(jobDir, "image_${i + 1}.jpg")
             files += file
-            if (file.exists() && file.length() > 0) return@forEachIndexed
+            // il file ".placeholder" indica un segnaposto: con "Riprova" si tenta di nuovo
+            val marker = File(jobDir, "image_${i + 1}.placeholder")
+            if (file.exists() && file.length() > 0 && !marker.exists()) return@forEachIndexed
             report(Phase.IMAGES, i.toFloat() / script.scenes.size, "Creo l'immagine ${i + 1} di ${script.scenes.size} con ${provider.name}…")
             val bitmap: Bitmap? = try {
                 retry(times = 3, initialDelayMs = 3000, shouldRetry = ::isImageErrorRetryable, onRetry = { attempt, _ ->
@@ -204,6 +206,7 @@ class GenerationPipeline(
                 ImageTools.saveJpeg(frame, file)
                 frame.recycle()
             }
+            if (bitmap == null) marker.createNewFile() else marker.delete()
             // piccola pausa per rispettare i limiti delle API gratuite
             if (i < script.scenes.lastIndex) delay(800)
         }

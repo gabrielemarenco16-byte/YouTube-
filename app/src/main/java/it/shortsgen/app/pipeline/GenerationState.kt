@@ -16,12 +16,25 @@ enum class Phase(val label: String, val weight: Float) {
 
     /** Avanzamento complessivo (0..1) a partire da quello della fase. */
     fun overall(phaseProgress: Float): Float {
-        val before = entries.take(ordinal).sumOf { it.weight.toDouble() }.toFloat()
-        return (before + weight * phaseProgress.coerceIn(0f, 1f)).coerceIn(0f, 1f)
+        val start = STARTS[ordinal]
+        val end = STARTS[ordinal + 1]
+        return (start + (end - start) * phaseProgress.coerceIn(0f, 1f)).coerceIn(0f, 1f)
     }
 
     companion object {
         val COUNT = entries.size
+
+        /** Inizio cumulativo di ogni fase (l'ultimo valore è la fine). */
+        private val STARTS: FloatArray by lazy {
+            val total = entries.sumOf { it.weight.toDouble() }
+            val arr = FloatArray(entries.size + 1)
+            var acc = 0.0
+            entries.forEachIndexed { i, ph ->
+                acc += ph.weight
+                arr[i + 1] = (acc / total).toFloat()
+            }
+            arr
+        }
     }
 }
 
