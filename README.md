@@ -92,6 +92,12 @@ La compilazione dura circa 5-10 minuti. Un pallino verde ✅ vuol dire che è an
 
 ## 3. Scaricare e installare l'APK
 
+**Metodo più semplice:** ogni push aggiorna la pre-release **"debug-latest"**. Apri
+<https://github.com/gabrielemarenco16-byte/YouTube-/releases/tag/debug-latest> dal telefono e tocca
+**`ShortsGenerator-debug.apk`**: scarichi direttamente l'APK, senza zip. Poi passa al punto 4.
+
+In alternativa, dagli artifact di Actions:
+
 1. In **Actions** apri l'ultima esecuzione riuscita di **"Build APK"**.
 2. In fondo alla pagina, nella sezione **Artifacts**, tocca **`ShortsGenerator-debug-apk`**.
    GitHub scarica un file **.zip** (serve essere loggati su GitHub).
