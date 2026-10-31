@@ -171,6 +171,14 @@ class GenerationPipeline(
         saveSettings { it.copy(geminiImageModel = m) }
     })
 
+    private fun pollinations(): ImageProvider = PollinationsImageProvider(onWait = { sec ->
+        report(Phase.IMAGES, imagesProgress, "Limite gratuito di Pollinations: aspetto $sec secondi…")
+    })
+
+    /** Avanzamento corrente della fase immagini (per i messaggi di attesa). */
+    @Volatile
+    private var imagesProgress = 0f
+
     private fun cloudflare(): ImageProvider = CloudflareImageProvider(
         settings.cloudflareAccountId, settings.cloudflareToken, settings.cloudflareModel,
     )
@@ -186,11 +194,11 @@ class GenerationPipeline(
             when (settings.imageProvider) {
                 ImageProviderType.CLOUDFLARE -> add(cloudflare())
                 ImageProviderType.GEMINI -> add(gemini())
-                ImageProviderType.POLLINATIONS -> add(PollinationsImageProvider())
+                ImageProviderType.POLLINATIONS -> add(pollinations())
             }
             if (settings.imageProvider != ImageProviderType.CLOUDFLARE && hasCloudflare) add(cloudflare())
             if (settings.imageProvider != ImageProviderType.GEMINI && hasGemini) add(gemini())
-            if (settings.imageProvider != ImageProviderType.POLLINATIONS) add(PollinationsImageProvider())
+            if (settings.imageProvider != ImageProviderType.POLLINATIONS) add(pollinations())
         }
         return chain.reduceRight { primary, rest ->
             FallbackImageProvider(primary, rest) { reason ->
@@ -210,6 +218,7 @@ class GenerationPipeline(
             // il file ".placeholder" indica un segnaposto: con "Riprova" si tenta di nuovo
             val marker = File(jobDir, "image_${i + 1}.placeholder")
             if (file.exists() && file.length() > 0 && !marker.exists()) return@forEachIndexed
+            imagesProgress = i.toFloat() / script.scenes.size
             report(Phase.IMAGES, i.toFloat() / script.scenes.size, "Creo l'immagine ${i + 1} di ${script.scenes.size} con ${provider.name}…")
             val bitmap: Bitmap? = try {
                 retry(times = 3, initialDelayMs = 3000, shouldRetry = ::isImageErrorRetryable, onRetry = { attempt, _ ->

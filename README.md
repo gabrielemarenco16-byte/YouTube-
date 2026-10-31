@@ -54,8 +54,8 @@ usa Cloudflare. Se un modello viene ritirato (errore 404) l'app chiede a Google 
 Modello predefinito: `llama-3.3-70b-versatile` (elenco su <https://console.groq.com/docs/models>).
 
 ### Pollinations.ai – immagini senza chiave (predefinito)
-Non serve nessuna registrazione: è già attivo. È gratuito ma può essere lento o avere limiti nelle ore
-di punta. Se un altro servizio di immagini fallisce (chiave non valida o quota finita), l'app usa
+Non serve nessuna registrazione: è già attivo. È gratuito ma permette circa **1 immagine ogni 45 secondi**:
+l'app aspetta da sola, quindi le 7 immagini richiedono circa 5-6 minuti. Se un altro servizio di immagini fallisce (chiave non valida o quota finita), l'app usa
 automaticamente Pollinations come ultima riserva.
 
 ### Cloudflare Workers AI – immagini (qualità migliore)
