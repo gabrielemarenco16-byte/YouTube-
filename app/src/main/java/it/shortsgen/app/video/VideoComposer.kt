@@ -34,7 +34,7 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 /** Contenuto visivo di una scena: un'immagine oppure una clip video (tagliata a [durationMs]). */
-data class SceneVisual(val file: File, val durationMs: Long, val isVideo: Boolean = false)
+data class SceneVisual(val file: File, val durationMs: Long, val isVideo: Boolean = false, val startMs: Long = 0)
 
 /** Montaggio del video finale con Media3 Transformer. */
 @OptIn(UnstableApi::class)
@@ -108,7 +108,10 @@ class VideoComposer(private val context: Context) {
                 val mediaItem = MediaItem.Builder()
                     .setUri(Uri.fromFile(scene.file))
                     .setClippingConfiguration(
-                        MediaItem.ClippingConfiguration.Builder().setEndPositionMs(scene.durationMs).build()
+                        MediaItem.ClippingConfiguration.Builder()
+                            .setStartPositionMs(scene.startMs)
+                            .setEndPositionMs(scene.startMs + scene.durationMs)
+                            .build()
                     )
                     .build()
                 EditedMediaItem.Builder(mediaItem)

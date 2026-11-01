@@ -76,15 +76,16 @@ class MediaCollectorTest {
     }
 
     @Test
-    fun placeholderOnlyWhenEverythingFailsWithClearWarning() = runTest {
+    fun failedSceneReusesAnotherSceneClipWithClearLog() = runTest {
         val logs = mutableListOf<String>()
         val primary = Fake("Pexels", { _: Int -> GenerationException("Pexels: nessun video trovato") })
         val secondary = Fake("Cloudflare", { _: Int -> MissingKeyException("CF_ACCOUNT_ID / CF_API_TOKEN", "Credenziali Cloudflare mancanti") })
         val result = collector(primary, secondary, logs = logs).collect(requests(2), tmp.root)
-        assertTrue(result.media[0].placeholder)
-        assertFalse(result.media[1].placeholder)
-        assertTrue(result.warnings.any { it.contains("scena 1 senza clip né foto") && it.contains("scheda grafica") })
-        assertTrue(logs.any { it.contains("ATTENZIONE") })
+        // la scena 1 non trova nulla: riusa la clip della scena 2, nessuna scheda grafica
+        assertEquals(0, result.placeholderCount)
+        assertEquals(1, result.media[0].reusedFromScene)
+        assertTrue(result.warnings.any { it.contains("riusato un tratto della clip della scena 2") })
+        assertTrue(logs.any { it.contains("Scena 1: nessuna clip del soggetto") })
     }
 
     @Test
@@ -165,5 +166,52 @@ class MediaCollectorTest {
         val none = { _: Int -> GenerationException("nessun altro risultato") }
         val c = collector(Fake("Pixabay", none, none, none))
         assertEquals(null, c.replace(MediaRequest(0, listOf("x"), "p", 1, 1), tmp.root, emptySet(), "Pixabay"))
+    }
+
+    @Test
+    fun sceneWithoutSubjectClipReusesAnotherSceneClipNotTheCard() = runTest {
+        val none = { _: Int -> GenerationException("nessuna clip del soggetto") }
+        // scena 0 ok, scena 1 niente, scena 2 ok
+        val provider = Fake("Pixabay", { _: Int -> "clip-a" }, none, { _: Int -> "clip-b" })
+        val requests = List(3) { MediaRequest(it, listOf("jellyfish q$it"), "p", 4_000) }
+        val result = collector(provider).collect(requests, tmp.root)
+        assertEquals(0, result.placeholderCount)
+        val reused = result.media[1]
+        assertTrue(reused.reusedFromScene in listOf(0, 2))
+        assertTrue(reused.branch.startsWith("riuso clip della scena"))
+        assertTrue(result.sceneLog[1].contains("riuso clip della scena"))
+    }
+
+    @Test
+    fun reusedClipStartsAfterTheUsedPart() {
+        val donor = SceneMedia(MediaKind.VIDEO, "f", "Pixabay", "x", durationMs = 20_000)
+        assertEquals(5_000, MediaCollector.reuseStart(donor, donorUsedMs = 5_000, nextFree = null, needMs = 6_000))
+        // non c'è spazio dopo: usa la parte finale
+        assertEquals(19_500 - 6_000, MediaCollector.reuseStart(donor, donorUsedMs = 15_000, nextFree = null, needMs = 6_000))
+        // clip troppo corta: dall'inizio
+        assertEquals(0, MediaCollector.reuseStart(donor.copy(durationMs = 4_000), 3_000, null, 6_000))
+    }
+
+    @Test
+    fun hookKeepsTheMostDynamicCandidate() = runTest {
+        val provider = object : ImageProvider {
+            override val name = "Pixabay"
+            override suspend fun fetch(request: MediaRequest, dir: File, usedIds: Set<String>) = error("non usato")
+            override suspend fun fetchCandidates(request: MediaRequest, dir: File, usedIds: Set<String>) =
+                listOf("calm", "wild", "medium").map {
+                    SceneMedia(MediaKind.VIDEO, File(dir, "$it.mp4").apply { writeText("x") }.path, name, it, query = "jellyfish")
+                }
+        }
+        val scores = mapOf("calm" to 2.0, "wild" to 30.0, "medium" to 10.0)
+        val c = MediaCollector(
+            providers = listOf(provider),
+            placeholder = { r, d -> error("non usato") },
+            pauseBetweenScenesMs = 0,
+            motionScore = { scores.getValue(it.sourceId) },
+        )
+        val result = c.collect(listOf(MediaRequest(0, listOf("jellyfish"), "p", 4_000, candidates = 3)), tmp.root)
+        assertEquals("wild", result.media.single().sourceId)
+        assertEquals(30.0, result.media.single().motion, 1e-9)
+        assertFalse(File(tmp.root, "calm.mp4").exists())
     }
 }

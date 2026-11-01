@@ -11,8 +11,13 @@ import kotlinx.serialization.json.longOrNull
 /** Lettura delle risposte Pexels e scelta dei file (logica pura, testabile). */
 object PexelsApi {
     data class VideoFile(val link: String, val width: Int, val height: Int, val fileType: String)
-    data class Video(val id: Long, val durationSec: Int, val files: List<VideoFile>)
-    data class Photo(val id: Long, val url: String)
+    /** [description]: testo ricavato dall'indirizzo della pagina (es. "jellyfish swimming in the ocean"). */
+    data class Video(val id: Long, val durationSec: Int, val files: List<VideoFile>, val description: String = "")
+    data class Photo(val id: Long, val url: String, val description: String = "")
+
+    /** "https://www.pexels.com/video/jellyfish-in-the-sea-1234567/" → "jellyfish in the sea" */
+    fun describeFromUrl(url: String?): String =
+        url.orEmpty().trimEnd('/').substringAfterLast('/').replace(Regex("-?\\d+$"), "").replace('-', ' ').trim()
 
     fun videoId(id: Long) = "pexels-video-$id"
     fun photoId(id: Long) = "pexels-photo-$id"
@@ -34,7 +39,7 @@ object PexelsApi {
                     fileType = (fo["file_type"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
                 )
             }
-            Video(id, duration, files)
+            Video(id, duration, files, describeFromUrl((o["url"] as? JsonPrimitive)?.contentOrNull))
         }
     }
 
@@ -52,7 +57,8 @@ object PexelsApi {
             } else {
                 (src["portrait"] as? JsonPrimitive)?.contentOrNull ?: (src["large2x"] as? JsonPrimitive)?.contentOrNull
             } ?: return@mapNotNull null
-            Photo(id, url)
+            val alt = (o["alt"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+            Photo(id, url, alt.ifEmpty { describeFromUrl((o["url"] as? JsonPrimitive)?.contentOrNull) })
         }
     }
 
@@ -62,10 +68,17 @@ object PexelsApi {
             .minByOrNull { kotlin.math.abs(it.height - 1920) }
 
     /** Primo video non ancora usato, lungo abbastanza e con un file adatto. */
-    fun chooseVideo(videos: List<Video>, minDurationMs: Long, usedIds: Set<String>): Pair<Video, VideoFile>? =
+    /** Primo video non ancora usato, lungo abbastanza, senza persone (se vietate) e con un file adatto. */
+    fun chooseVideo(videos: List<Video>, minDurationMs: Long, usedIds: Set<String>, allowPeople: Boolean = true): Pair<Video, VideoFile>? =
+        chooseVideos(videos, minDurationMs, usedIds, allowPeople, 1).firstOrNull()
+
+    /** Fino a [max] video adatti, nell'ordine dei risultati. */
+    fun chooseVideos(videos: List<Video>, minDurationMs: Long, usedIds: Set<String>, allowPeople: Boolean, max: Int): List<Pair<Video, VideoFile>> =
         videos.asSequence()
             .filter { videoId(it.id) !in usedIds }
             .filter { it.durationSec * 1000L >= minDurationMs }
+            .filter { PeopleFilter.allowed(it.description, allowPeople) }
             .mapNotNull { v -> chooseFile(v.files)?.let { v to it } }
-            .firstOrNull()
+            .take(max)
+            .toList()
 }

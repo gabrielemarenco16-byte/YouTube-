@@ -24,25 +24,34 @@ class PixabayProvider(
 ) : ImageProvider {
     override val name = NAME
 
-    override suspend fun fetch(request: MediaRequest, dir: File, usedIds: Set<String>): SceneMedia {
+    override suspend fun fetch(request: MediaRequest, dir: File, usedIds: Set<String>): SceneMedia =
+        fetchCandidates(request.copy(candidates = 1), dir, usedIds).first()
+
+    override suspend fun fetchCandidates(request: MediaRequest, dir: File, usedIds: Set<String>): List<SceneMedia> {
         if (apiKey.isBlank()) {
             throw MissingKeyException("PIXABAY_API_KEY", "Chiave Pixabay mancante: inserisci PIXABAY_API_KEY nelle Impostazioni.")
         }
+        val n = request.sceneIndex + 1
         for (query in request.queries) {
-            val chosen = PixabayApi.chooseVideo(searchVideos(query), request.minDurationMs, usedIds) ?: continue
-            val (video, file) = chosen
-            val target = File(dir, "scene_${request.sceneIndex + 1}.mp4")
-            client.downloadTo(file.url, target, NAME)
-            Log.i(TAG, "Scena ${request.sceneIndex + 1}: video Pixabay ${video.id} per \"$query\" (${file.width}x${file.height})")
-            return SceneMedia(
-                MediaKind.VIDEO, target.absolutePath, NAME, PixabayApi.videoId(video.id),
-                query = query, detail = "video ${file.width}x${file.height}, ${video.durationSec} s",
-            )
+            val chosen = PixabayApi.chooseVideos(searchVideos(query), request.minDurationMs, usedIds, request.allowPeople, request.candidates.coerceAtLeast(1))
+            if (chosen.isEmpty()) continue
+            return chosen.mapIndexed { k, (video, file) ->
+                val target = File(dir, if (chosen.size == 1) "scene_$n.mp4" else "scene_${n}_c${k + 1}.mp4")
+                client.downloadTo(file.url, target, NAME)
+                Log.i(TAG, "Scena $n: video Pixabay ${video.id} per \"$query\" (${file.width}x${file.height}) – ${video.description}")
+                SceneMedia(
+                    MediaKind.VIDEO, target.absolutePath, NAME, PixabayApi.videoId(video.id),
+                    query = query, detail = "video ${file.width}x${file.height}, ${video.durationSec} s",
+                    durationMs = video.durationSec * 1000L, description = video.description,
+                )
+            }
         }
         for (query in request.queries) {
-            val photo = searchPhotos(query).firstOrNull { PixabayApi.photoId(it.id) !in usedIds } ?: continue
-            val downloaded = File(dir, "scene_${request.sceneIndex + 1}.download")
-            val target = File(dir, "scene_${request.sceneIndex + 1}.jpg")
+            val photo = searchPhotos(query).firstOrNull {
+                PixabayApi.photoId(it.id) !in usedIds && PeopleFilter.allowed(it.description, request.allowPeople)
+            } ?: continue
+            val downloaded = File(dir, "scene_$n.download")
+            val target = File(dir, "scene_$n.jpg")
             client.downloadTo(photo.url, downloaded, NAME, maxBytes = 30L * 1024 * 1024)
             try {
                 withContext(Dispatchers.Default) {
@@ -56,15 +65,16 @@ class PixabayProvider(
             } finally {
                 downloaded.delete()
             }
-            Log.i(TAG, "Scena ${request.sceneIndex + 1}: foto Pixabay ${photo.id} per \"$query\"")
-            return SceneMedia(
-                MediaKind.IMAGE, target.absolutePath, NAME, PixabayApi.photoId(photo.id),
-                query = query, detail = "foto ${photo.width}x${photo.height}",
+            Log.i(TAG, "Scena $n: foto Pixabay ${photo.id} per \"$query\" – ${photo.description}")
+            return listOf(
+                SceneMedia(
+                    MediaKind.IMAGE, target.absolutePath, NAME, PixabayApi.photoId(photo.id),
+                    query = query, detail = "foto ${photo.width}x${photo.height}", description = photo.description,
+                )
             )
         }
         throw GenerationException(
-            "Pixabay: nessun video o foto adatto trovato per la scena ${request.sceneIndex + 1} " +
-                "(ricerche: ${request.queries.joinToString(", ")})."
+            "Pixabay: nessun video o foto adatto trovato per la scena $n (ricerche: ${request.queries.joinToString(", ")})."
         )
     }
 

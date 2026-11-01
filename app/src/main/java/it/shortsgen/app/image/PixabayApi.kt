@@ -11,8 +11,9 @@ import kotlinx.serialization.json.longOrNull
 /** Lettura delle risposte Pixabay e scelta dei file (logica pura, testabile). */
 object PixabayApi {
     data class VideoFile(val url: String, val width: Int, val height: Int)
-    data class Video(val id: Long, val durationSec: Int, val files: List<VideoFile>)
-    data class Photo(val id: Long, val url: String, val width: Int, val height: Int)
+    /** [description]: i tag di Pixabay (es. "jellyfish, sea, ocean"). */
+    data class Video(val id: Long, val durationSec: Int, val files: List<VideoFile>, val description: String = "")
+    data class Photo(val id: Long, val url: String, val width: Int, val height: Int, val description: String = "")
 
     fun videoId(id: Long) = "pixabay-video-$id"
     fun photoId(id: Long) = "pixabay-photo-$id"
@@ -33,7 +34,7 @@ object PixabayApi {
                 val url = (f["url"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
                 VideoFile(url, (f["width"] as? JsonPrimitive)?.intOrNull ?: 0, (f["height"] as? JsonPrimitive)?.intOrNull ?: 0)
             }
-            Video(id, duration, files)
+            Video(id, duration, files, (o["tags"] as? JsonPrimitive)?.contentOrNull.orEmpty())
         }
     }
 
@@ -44,7 +45,12 @@ object PixabayApi {
             val o = h as? JsonObject ?: return@mapNotNull null
             val id = (o["id"] as? JsonPrimitive)?.longOrNull ?: return@mapNotNull null
             val url = ((o["largeImageURL"] ?: o["webformatURL"]) as? JsonPrimitive)?.contentOrNull ?: return@mapNotNull null
-            Photo(id, url, (o["imageWidth"] as? JsonPrimitive)?.intOrNull ?: 0, (o["imageHeight"] as? JsonPrimitive)?.intOrNull ?: 0)
+            Photo(
+                id, url,
+                (o["imageWidth"] as? JsonPrimitive)?.intOrNull ?: 0,
+                (o["imageHeight"] as? JsonPrimitive)?.intOrNull ?: 0,
+                (o["tags"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
+            )
         }
     }
 
@@ -58,11 +64,17 @@ object PixabayApi {
         return files.filter { it.height >= 1080 && it.width <= 3840 }.maxByOrNull { it.height }
     }
 
-    /** Prima i video verticali, poi gli orizzontali ritagliabili; mai uno già usato. */
-    fun chooseVideo(videos: List<Video>, minDurationMs: Long, usedIds: Set<String>): Pair<Video, VideoFile>? {
+    /** Prima i video verticali, poi gli orizzontali ritagliabili; mai uno già usato né con persone (se vietate). */
+    fun chooseVideo(videos: List<Video>, minDurationMs: Long, usedIds: Set<String>, allowPeople: Boolean = true): Pair<Video, VideoFile>? =
+        chooseVideos(videos, minDurationMs, usedIds, allowPeople, 1).firstOrNull()
+
+    /** Fino a [max] video adatti: prima i verticali, poi gli orizzontali ritagliabili. */
+    fun chooseVideos(videos: List<Video>, minDurationMs: Long, usedIds: Set<String>, allowPeople: Boolean, max: Int): List<Pair<Video, VideoFile>> {
         val candidates = videos
             .filter { videoId(it.id) !in usedIds && it.durationSec * 1000L >= minDurationMs }
+            .filter { PeopleFilter.allowed(it.description, allowPeople) }
             .mapNotNull { v -> chooseFile(v.files)?.let { v to it } }
-        return candidates.firstOrNull { (_, f) -> f.height >= f.width } ?: candidates.firstOrNull()
+        val (vertical, horizontal) = candidates.partition { (_, f) -> f.height >= f.width }
+        return (vertical + horizontal).take(max)
     }
 }

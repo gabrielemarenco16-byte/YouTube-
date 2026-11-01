@@ -21,6 +21,16 @@ data class SceneMedia(
     val detail: String = "",
     /** Ramo usato per trovarlo (es. "clip – query della scena", "foto – query del tema", "scheda grafica"). */
     val branch: String = "",
+    /** Durata della clip originale (0 se sconosciuta o immagine). */
+    val durationMs: Long = 0,
+    /** Da dove iniziare la clip (usato quando la clip di un'altra scena viene riutilizzata). */
+    val startMs: Long = 0,
+    /** Descrizione/tag del file presso il servizio. */
+    val description: String = "",
+    /** Se la clip è presa da un'altra scena: indice (da 0) di quella scena, altrimenti -1. */
+    val reusedFromScene: Int = -1,
+    /** Punteggio di movimento (solo per le clip confrontate, es. l'hook). */
+    val motion: Double = -1.0,
 ) {
     val file: File get() = File(path)
 }
@@ -38,6 +48,10 @@ data class MediaRequest(
     val sceneQueryCount: Int = queries.size,
     /** Parola chiave da mostrare sulla scheda grafica se non si trova nessuna clip né foto. */
     val keyword: String = queries.firstOrNull().orEmpty(),
+    /** false = scartare clip/foto con persone (il copione non parla di persone). */
+    val allowPeople: Boolean = true,
+    /** Quante clip candidate scaricare (per l'hook se ne confrontano alcune e si tiene la più movimentata). */
+    val candidates: Int = 1,
 )
 
 /**
@@ -48,4 +62,11 @@ interface ImageProvider {
     val name: String
 
     suspend fun fetch(request: MediaRequest, dir: File, usedIds: Set<String>): SceneMedia
+
+    /**
+     * Fino a [MediaRequest.candidates] file diversi (per scegliere la clip più d'impatto).
+     * Di base restituisce un solo file.
+     */
+    suspend fun fetchCandidates(request: MediaRequest, dir: File, usedIds: Set<String>): List<SceneMedia> =
+        listOf(fetch(request, dir, usedIds))
 }

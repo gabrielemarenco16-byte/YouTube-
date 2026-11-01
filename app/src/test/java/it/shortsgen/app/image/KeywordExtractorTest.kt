@@ -1,6 +1,7 @@
 package it.shortsgen.app.image
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class KeywordExtractorTest {
@@ -40,5 +41,39 @@ class KeywordExtractorTest {
         )
         assertEquals(listOf("seed pod", "dandelion seeds", "wind", "tree", "forest", "plant", "plants"), q.all)
         assertEquals(3, q.sceneCount)
+    }
+
+    @Test
+    fun subjectIsAddedToEveryQueryAndLastIsSubjectAlone() {
+        val q = KeywordExtractor.sceneQueries(
+            llmQueries = listOf("glowing in dark water", "jellyfish tentacles", "coral reef"),
+            theme = "ocean",
+            themeQueries = listOf("sea", "underwater"),
+            subject = "jellyfish",
+        )
+        assertEquals(
+            listOf(
+                "jellyfish glowing in dark", "jellyfish tentacles", "jellyfish coral reef",
+                "jellyfish sea", "jellyfish underwater", "jellyfish ocean", "jellyfish",
+            ),
+            q.all,
+        )
+        assertTrue(q.all.all { it.contains("jellyfish") })
+        assertEquals(3, q.sceneCount)
+    }
+
+    @Test
+    fun hookPutsTheMostSpecificQueryFirst() {
+        val q = KeywordExtractor.sceneQueries(
+            llmQueries = listOf("jellyfish", "jellyfish pulsing glowing tentacles", "jellyfish swimming"),
+            theme = "", subject = "jellyfish", hook = true,
+        )
+        assertEquals("jellyfish pulsing glowing tentacles", q.all.first())
+    }
+
+    @Test
+    fun pluralSubjectIsNotDuplicated() {
+        assertEquals("jellyfishes swimming", KeywordExtractor.withSubject("jellyfishes swimming", "jellyfish"))
+        assertEquals("honey bee flower", KeywordExtractor.withSubject("flower", "honey bee"))
     }
 }

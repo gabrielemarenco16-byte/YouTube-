@@ -116,7 +116,8 @@ class EndToEndTest {
                 "durata ${timeline.scenes[i].durationMs} ms – \"${script.scenes[i].narration}\"")
         }
         val placeholders = media.count { it.placeholder }
-        val duplicates = media.groupBy { it.sourceId }.filter { it.value.size > 1 }.keys
+        // i riusi voluti (scena senza clip del soggetto) non contano come file ripetuti
+        val duplicates = media.filter { it.reusedFromScene < 0 }.groupBy { it.sourceId }.filter { it.value.size > 1 }.keys
 
         // --- sottotitoli ---
         val subs = SubtitleCheck.check(script.scenes.map { it.narration }, timeline.cues, timeline.totalMs)
@@ -269,6 +270,7 @@ class EndToEndTest {
             ),
             theme = "ocean",
             themeQueries = listOf("ocean waves", "underwater", "sea", "beach"),
+            subject = "octopus",
         )
     }
 }

@@ -12,6 +12,8 @@ import it.shortsgen.app.image.KeywordExtractor
 import it.shortsgen.app.image.MediaCollector
 import it.shortsgen.app.image.MediaKind
 import it.shortsgen.app.image.MediaRequest
+import it.shortsgen.app.image.MotionScorer
+import it.shortsgen.app.image.PeopleFilter
 import it.shortsgen.app.image.PexelsProvider
 import it.shortsgen.app.image.PixabayProvider
 import it.shortsgen.app.image.SceneMedia
@@ -210,8 +212,13 @@ class GenerationPipeline(
     private fun writeManifest(jobDir: File, manifest: MediaManifest) =
         File(jobDir, "media.json").writeText(Http.json.encodeToString(MediaManifest.serializer(), manifest))
 
-    private fun buildRequests(script: VideoScript, timeline: Timeline): List<MediaRequest> =
-        script.scenes.mapIndexed { i, scene ->
+    private fun buildRequests(script: VideoScript, timeline: Timeline): List<MediaRequest> {
+        // Persone ammesse solo se il copione ne parla
+        val allowPeople = PeopleFilter.scriptMentionsPeople(
+            (listOf(script.topic, script.title) + script.scenes.map { it.narration }).joinToString(" ")
+        )
+        return script.scenes.mapIndexed { i, scene ->
+            val hook = i == 0
             val q = KeywordExtractor.sceneQueries(
                 llmQueries = scene.searchQueries,
                 theme = script.theme,
@@ -220,16 +227,22 @@ class GenerationPipeline(
                 imagePrompt = scene.imagePrompt,
                 narration = scene.narration,
                 topic = script.topic,
+                subject = script.subject,
+                hook = hook,
             )
             MediaRequest(
                 sceneIndex = i,
                 queries = q.all,
-                prompt = Prompts.imagePrompt(scene.imagePrompt),
+                prompt = Prompts.imagePrompt(scene.imagePrompt) + if (allowPeople) "" else " No people.",
                 minDurationMs = timeline.scenes[i].durationMs,
                 sceneQueryCount = q.sceneCount,
-                keyword = q.all.firstOrNull() ?: KeywordExtractor.keywords(scene.narration, 2),
+                keyword = script.subject.ifBlank { q.all.firstOrNull() ?: KeywordExtractor.keywords(scene.narration, 2) },
+                allowPeople = allowPeople,
+                // apertura: si scaricano 3 clip e si tiene la più movimentata
+                candidates = if (hook) 3 else 1,
             )
         }
+    }
 
     /** Ultima scelta: scheda grafica con la parola chiave della scena (sfondo scuro uniforme). */
     private suspend fun keywordCard(request: MediaRequest, dir: File): SceneMedia = withContext(Dispatchers.Default) {
@@ -246,6 +259,7 @@ class GenerationPipeline(
         log = { Log.w(TAG, it) },
         info = { Log.i(MEDIA_TAG, it) },
         onStatus = { i, text -> report(Phase.IMAGES, i.toFloat() / sceneCount, text) },
+        motionScore = { m -> MotionScorer.score(m, usedMs = 6_000) },
     )
 
     private suspend fun mediaStep(jobDir: File, script: VideoScript, timeline: Timeline): List<SceneMedia> {
@@ -332,7 +346,7 @@ class GenerationPipeline(
         report(Phase.VIDEO, 0f, "Monto il video…")
         val visuals = audio.timeline.scenes.map { slot ->
             val m = media[slot.index]
-            SceneVisual(m.file, slot.durationMs, isVideo = m.kind == MediaKind.VIDEO)
+            SceneVisual(m.file, slot.durationMs, isVideo = m.kind == MediaKind.VIDEO, startMs = m.startMs)
         }
         VideoComposer(context).compose(visuals, audio.narration, audio.timeline.cues, output) { p ->
             report(Phase.VIDEO, p, "Monto il video… ${(p * 100).toInt()}%")

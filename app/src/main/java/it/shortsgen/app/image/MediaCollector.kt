@@ -24,6 +24,8 @@ class MediaCollector(
     private val log: (String) -> Unit = {},
     /** Una riga per scena: query usata e file scelto (per i log e la schermata del risultato). */
     private val info: (String) -> Unit = {},
+    /** Misura del movimento di una clip (per scegliere la più d'impatto nell'hook); null = non misurare. */
+    private val motionScore: (suspend (SceneMedia) -> Double)? = null,
     private val onStatus: (sceneIndex: Int, text: String) -> Unit = { _, _ -> },
 ) {
     data class Result(val media: List<SceneMedia>, val warnings: List<String>, val sceneLog: List<String> = emptyList()) {
@@ -35,15 +37,16 @@ class MediaCollector(
         val warnings = mutableListOf<String>()
         /** Provider esclusi (chiave mancante o rifiutata) con il motivo. */
         val disabled = mutableMapOf<String, String>()
-        val media = ArrayList<SceneMedia>()
-        val sceneLog = ArrayList<String>()
+        val media = arrayOfNulls<SceneMedia>(requests.size)
+        val causes = arrayOfNulls<String>(requests.size)
+        val cachedFlags = BooleanArray(requests.size)
 
         requests.forEachIndexed { i, request ->
             val cached = existing.getOrNull(i)
-            if (cached != null && !cached.placeholder && cached.file.exists() && cached.sourceId !in usedIds) {
+            if (cached != null && !cached.placeholder && cached.reusedFromScene < 0 && cached.file.exists() && cached.sourceId !in usedIds) {
                 usedIds += cached.sourceId
-                media += cached
-                sceneLog += describe(i, request, cached, reused = true).also(info)
+                media[i] = cached
+                cachedFlags[i] = true
                 return@forEachIndexed
             }
             var found: SceneMedia? = null
@@ -56,7 +59,7 @@ class MediaCollector(
                 }
                 onStatus(i, "Scena ${i + 1} di ${requests.size}: cerco con ${provider.name}…")
                 try {
-                    found = retry(
+                    val candidates = retry(
                         times = attempts,
                         initialDelayMs = retryDelayMs,
                         shouldRetry = ::isRetryable,
@@ -64,7 +67,11 @@ class MediaCollector(
                             log("Scena ${i + 1}: ${provider.name} tentativo $attempt fallito: ${e.message}")
                             onStatus(i, "Scena ${i + 1}: ${provider.name}, nuovo tentativo (${attempt + 1} di $attempts)…")
                         },
-                    ) { provider.fetch(request, dir, usedIds) }
+                    ) {
+                        if (request.candidates > 1 && motionScore != null) provider.fetchCandidates(request, dir, usedIds)
+                        else listOf(provider.fetch(request, dir, usedIds))
+                    }
+                    found = pickMostDynamic(i, candidates)
                     break
                 } catch (e: CancellationException) {
                     throw e
@@ -79,19 +86,78 @@ class MediaCollector(
                     }
                 }
             }
-            val result = (found?.let { it.copy(branch = branchOf(request, it)) }) ?: placeholder(request, dir).copy(branch = BRANCH_CARD).also {
-                val reason = errors.lastOrNull() ?: "nessun servizio di immagini configurato"
+            if (found != null) {
+                val result = found.copy(branch = branchOf(request, found))
+                usedIds += result.sourceId
+                media[i] = result
+                if (i < requests.lastIndex) delay(pauseBetweenScenesMs)
+            } else {
+                causes[i] = errors.lastOrNull() ?: "nessun servizio di immagini configurato"
+            }
+        }
+
+        // Scene senza clip né foto del soggetto: si riusa la clip di un'altra scena (un tratto diverso),
+        // mai una clip generica. Solo se nel video non c'è nessuna clip si usa la scheda grafica.
+        val nextStart = mutableMapOf<Int, Long>()
+        val reuseCount = mutableMapOf<Int, Int>()
+        for (i in requests.indices) {
+            if (media[i] != null) continue
+            val donors = requests.indices.filter { j ->
+                val m = media[j]
+                m != null && !m.placeholder && m.reusedFromScene < 0
+            }
+            val donor = donors.sortedWith(
+                compareBy<Int> { if (media[it]!!.kind == MediaKind.VIDEO) 0 else 1 }
+                    .thenBy { reuseCount[it] ?: 0 }
+                    .thenBy { kotlin.math.abs(it - i) }
+            ).firstOrNull()
+            if (donor != null) {
+                val d = media[donor]!!
+                val need = requests[i].minDurationMs
+                val start = reuseStart(d, requests[donor].minDurationMs, nextStart[donor], need)
+                nextStart[donor] = start + need
+                reuseCount[donor] = (reuseCount[donor] ?: 0) + 1
+                media[i] = d.copy(
+                    branch = "riuso clip della scena ${donor + 1} (nessuna clip del soggetto per questa scena)",
+                    reusedFromScene = donor,
+                    startMs = start,
+                    motion = -1.0,
+                )
+                val note = "Scena ${i + 1}: nessuna clip del soggetto trovata, riusato un tratto della clip della scena ${donor + 1}."
+                log(note)
+                warnings += note
+            } else {
+                val request = requests[i]
+                media[i] = placeholder(request, dir).copy(branch = BRANCH_CARD)
                 val warning = "ATTENZIONE: scena ${i + 1} senza clip né foto: usata una scheda grafica con " +
-                    "\"${request.keyword.uppercase()}\". Causa: $reason"
+                    "\"${request.keyword.uppercase()}\". Causa: ${causes[i]}"
                 log(warning)
                 warnings += warning
             }
-            usedIds += result.sourceId
-            media += result
-            sceneLog += describe(i, request, result, reused = false, cause = errors.lastOrNull()).also(info)
-            if (i < requests.lastIndex && found != null) delay(pauseBetweenScenesMs)
         }
-        return Result(media, warnings.distinct(), sceneLog)
+
+        val list = media.map { it!! }
+        val sceneLog = list.mapIndexed { i, m ->
+            describe(i, requests[i], m, reused = cachedFlags[i], cause = causes[i]).also(info)
+        }
+        return Result(list, warnings.distinct(), sceneLog)
+    }
+
+    /** Tra più clip candidate (scena di apertura) tiene quella con più movimento e cancella le altre. */
+    private suspend fun pickMostDynamic(sceneIndex: Int, candidates: List<SceneMedia>): SceneMedia {
+        val scorer = motionScore
+        if (candidates.size == 1 || scorer == null) return candidates.first()
+        val scored = candidates.map { c ->
+            val score = if (c.kind == MediaKind.VIDEO) runCatching { scorer(c) }.getOrDefault(0.0) else 0.0
+            c.copy(motion = score)
+        }
+        val best = scored.maxByOrNull { it.motion }!!
+        log(
+            "Scena ${sceneIndex + 1}: movimento delle clip candidate " +
+                scored.joinToString(", ") { "${it.sourceId}=${"%.1f".format(it.motion)}" } + " → scelta ${best.sourceId}"
+        )
+        scored.filter { it !== best && it.path != best.path }.forEach { File(it.path).delete() }
+        return best
     }
 
     /**
@@ -126,11 +192,31 @@ class MediaCollector(
                 "$tried | causa: ${cause ?: "nessun servizio configurato"}"
         } else {
             "Scena ${i + 1} | ramo: ${m.branch} | query usata: \"${m.query}\" | ${m.source} ${m.sourceId} (${m.detail}) | " +
-                "file: ${m.file.name}" + (if (reused) " | riutilizzato da tentativo precedente" else "") + " | $tried"
+                "file: ${m.file.name}" +
+                (if (m.startMs > 0) " | da ${m.startMs / 1000.0} s" else "") +
+                (if (m.motion >= 0) " | movimento ${"%.1f".format(m.motion)}" else "") +
+                (if (m.description.isNotBlank()) " | descrizione: ${m.description.take(80)}" else "") +
+                (if (reused) " | riutilizzato da tentativo precedente" else "") + " | $tried"
         }
     }
 
     companion object {
+        /**
+         * Da dove far partire una clip riutilizzata: dopo il tratto già usato se c'è spazio,
+         * altrimenti la parte finale della clip, altrimenti dall'inizio.
+         */
+        fun reuseStart(donor: SceneMedia, donorUsedMs: Long, nextFree: Long?, needMs: Long): Long {
+            if (donor.kind != MediaKind.VIDEO || donor.durationMs <= 0) return 0
+            // margine: la durata dichiarata dai servizi è arrotondata al secondo
+            val usable = donor.durationMs - 500
+            val after = nextFree ?: (donor.startMs + donorUsedMs)
+            return when {
+                after + needMs <= usable -> after
+                usable > needMs -> usable - needMs
+                else -> 0
+            }
+        }
+
         const val BRANCH_CARD = "scheda grafica (nessuna clip né foto trovata)"
 
         /** Quale ramo ha prodotto il file: clip/foto, query della scena o del tema, immagine AI. */

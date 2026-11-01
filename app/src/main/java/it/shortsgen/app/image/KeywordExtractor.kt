@@ -35,10 +35,27 @@ object KeywordExtractor {
     /** Ricerche per una scena: specifiche + del tema, con il numero di quelle specifiche. */
     data class SceneQueries(val all: List<String>, val sceneCount: Int)
 
+    /** Aggiunge il soggetto alla ricerca se non c'è già (es. "glowing water" → "jellyfish glowing water"). */
+    fun withSubject(query: String, subject: String): String {
+        val q = clean(query)
+        val s = clean(subject)
+        if (s.isEmpty()) return q
+        if (q.isEmpty()) return s
+        val qWords = q.split(" ")
+        val subjectWords = s.split(" ")
+        // "jellyfishes" o "jellyfish" contano come presenti
+        val present = subjectWords.all { sw -> qWords.any { it == sw || it.startsWith(sw) || sw.startsWith(it) && it.length > 3 } }
+        if (present) return q
+        return (subjectWords + qWords.filter { it !in subjectWords }).take(subjectWords.size + 3).joinToString(" ")
+    }
+
     /**
-     * Ricerche per una scena, nell'ordine in cui vanno provate:
-     * 1) le query visive della scena generate dall'LLM (massimo 3; se mancano, parole chiave ricavate dalla scena);
-     * 2) le query generiche del tema (es. "tree", "forest", "seed pod", "plant") e il tema stesso.
+     * Ricerche per una scena, nell'ordine in cui vanno provate. Il soggetto principale del video
+     * è SEMPRE presente in ogni ricerca, così nessuna scena finisce su immagini estranee al tema:
+     * 1) le query della scena (massimo 3), ciascuna con il soggetto;
+     *    per la scena di apertura (hook) prima le più specifiche;
+     * 2) le query del tema con il soggetto (es. "jellyfish ocean");
+     * 3) il soggetto da solo.
      */
     fun sceneQueries(
         llmQueries: List<String>,
@@ -48,21 +65,32 @@ object KeywordExtractor {
         imagePrompt: String = "",
         narration: String = "",
         topic: String = "",
+        subject: String = "",
+        hook: Boolean = false,
     ): SceneQueries {
-        val scene = mutableListOf<String>()
+        val subj = clean(subject).ifEmpty { keywords(topic, 1) }
         fun addTo(list: MutableList<String>, q: String) {
-            val c = clean(q)
+            val c = withSubject(q, subj)
             if (c.isNotEmpty() && c !in list) list += c
         }
-        llmQueries.take(3).forEach { addTo(scene, it) }
-        if (scene.isEmpty()) {
-            addTo(scene, searchQuery)
-            addTo(scene, keywords(imagePrompt, 3))
-            addTo(scene, keywords(narration, 3))
+        val raw = mutableListOf<String>()
+        llmQueries.take(3).forEach { if (clean(it).isNotEmpty()) raw += it }
+        if (raw.isEmpty()) {
+            listOf(searchQuery, keywords(imagePrompt, 3), keywords(narration, 3)).filter { it.isNotBlank() }.forEach { raw += it }
+        }
+        val scene = mutableListOf<String>()
+        raw.forEach { addTo(scene, it) }
+        if (hook) {
+            // la ricerca più specifica (più parole) per prima: l'apertura deve essere d'impatto
+            val sorted = scene.withIndex().sortedWith(compareByDescending<IndexedValue<String>> { it.value.split(" ").size }.thenBy { it.index })
+            scene.clear()
+            scene += sorted.map { it.value }
         }
         val generic = mutableListOf<String>()
         themeQueries.take(5).forEach { addTo(generic, it) }
-        addTo(generic, clean(theme).ifEmpty { keywords(topic, 1) }.ifEmpty { GENERIC.first() })
+        clean(theme).takeIf { it.isNotEmpty() }?.let { addTo(generic, it) }
+        // mai ricerche generiche estranee al soggetto: l'ultima ricerca è il soggetto da solo
+        if (subj.isNotEmpty()) addTo(generic, subj)
         val themePart = generic.filter { it !in scene }
         return SceneQueries(scene + themePart, scene.size)
     }
@@ -76,5 +104,6 @@ object KeywordExtractor {
         narration: String = "",
         topic: String = "",
         themeQueries: List<String> = emptyList(),
-    ): List<String> = sceneQueries(llmQueries, theme, themeQueries, searchQuery, imagePrompt, narration, topic).all
+        subject: String = "",
+    ): List<String> = sceneQueries(llmQueries, theme, themeQueries, searchQuery, imagePrompt, narration, topic, subject).all
 }
