@@ -76,4 +76,13 @@ class KeywordExtractorTest {
         assertEquals("jellyfishes swimming", KeywordExtractor.withSubject("jellyfishes swimming", "jellyfish"))
         assertEquals("honey bee flower", KeywordExtractor.withSubject("flower", "honey bee"))
     }
+
+    @Test
+    fun hookPrefersQueriesAboutTheSubject() {
+        val q = KeywordExtractor.sceneQueries(
+            llmQueries = listOf("octopus underwater", "octopus swimming", "coral reef"),
+            theme = "", subject = "octopus", hook = true,
+        )
+        assertEquals(listOf("octopus underwater", "octopus swimming", "octopus coral reef", "octopus"), q.all)
+    }
 }

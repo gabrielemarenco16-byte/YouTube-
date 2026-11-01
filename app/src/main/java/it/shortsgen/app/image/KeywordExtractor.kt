@@ -78,14 +78,18 @@ object KeywordExtractor {
         if (raw.isEmpty()) {
             listOf(searchQuery, keywords(imagePrompt, 3), keywords(narration, 3)).filter { it.isNotBlank() }.forEach { raw += it }
         }
-        val scene = mutableListOf<String>()
-        raw.forEach { addTo(scene, it) }
-        if (hook) {
-            // la ricerca più specifica (più parole) per prima: l'apertura deve essere d'impatto
-            val sorted = scene.withIndex().sortedWith(compareByDescending<IndexedValue<String>> { it.value.split(" ").size }.thenBy { it.index })
-            scene.clear()
-            scene += sorted.map { it.value }
+        // per l'hook: prima le ricerche che già parlavano del soggetto, poi le più dettagliate
+        val ordered = if (hook && subj.isNotEmpty()) {
+            raw.withIndex().sortedWith(
+                compareByDescending<IndexedValue<String>> { withSubject(it.value, subj) == clean(it.value) }
+                    .thenByDescending { clean(it.value).split(" ").size }
+                    .thenBy { it.index }
+            ).map { it.value }
+        } else {
+            raw
         }
+        val scene = mutableListOf<String>()
+        ordered.forEach { addTo(scene, it) }
         val generic = mutableListOf<String>()
         themeQueries.take(5).forEach { addTo(generic, it) }
         clean(theme).takeIf { it.isNotEmpty() }?.let { addTo(generic, it) }
