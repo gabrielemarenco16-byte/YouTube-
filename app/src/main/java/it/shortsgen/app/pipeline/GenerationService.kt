@@ -56,6 +56,15 @@ class GenerationService : Service() {
                     job = scope.launch { generate(resume = intent.action == ACTION_RETRY) }
                 }
             }
+            ACTION_REPLACE_CLIP -> {
+                startInForeground("Cambio clip…", 0f)
+                val scene = intent.getIntExtra(EXTRA_SCENE, -1)
+                if (job?.isActive != true && scene >= 0) {
+                    job = scope.launch { replaceClip(scene) }
+                } else if (job?.isActive != true) {
+                    stopSelf(startId)
+                }
+            }
             else -> stopSelf(startId)
         }
         return START_NOT_STICKY
@@ -85,6 +94,36 @@ class GenerationService : Service() {
             android.util.Log.e(TAG, "Generazione fallita", e)
             GenerationRepository.update(GenerationState.Failed(message, phase))
             notifyFinished("Generazione non riuscita", message)
+        } finally {
+            releaseWakeLock()
+            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+            stopSelf()
+        }
+    }
+
+    /** Sostituisce la clip di una scena e rifà solo il montaggio. */
+    private suspend fun replaceClip(scene: Int) {
+        acquireWakeLock()
+        val previous = GenerationRepository.lastResult.value ?: JobStore(this).loadLastResult()
+        try {
+            if (previous == null) throw IllegalStateException("Nessun video da modificare")
+            GenerationRepository.setNotice(null)
+            GenerationRepository.update(GenerationState.Running(Phase.IMAGES, 0f, "Scena ${scene + 1}: cerco un'altra clip…"))
+            val pipeline = GenerationPipeline(this, SettingsRepository(this).load(), onState = { running ->
+                GenerationRepository.update(running)
+                updateProgressNotification(running)
+            })
+            val result = pipeline.replaceClip(previous, scene)
+            JobStore(this).saveResult(result)
+            GenerationRepository.update(GenerationState.Success(result))
+            GenerationRepository.setNotice("Clip della scena ${scene + 1} sostituita e video rimontato.")
+        } catch (e: CancellationException) {
+            previous?.let { GenerationRepository.update(GenerationState.Success(it)) }
+            GenerationRepository.setNotice("Cambio clip annullato: il video non è stato modificato.")
+        } catch (e: Throwable) {
+            android.util.Log.e(TAG, "Cambio clip fallito", e)
+            previous?.let { GenerationRepository.update(GenerationState.Success(it)) }
+            GenerationRepository.setNotice(ErrorMessages.toItalian(e, "Cambio clip"))
         } finally {
             releaseWakeLock()
             ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
@@ -170,6 +209,8 @@ class GenerationService : Service() {
         const val ACTION_START = "it.shortsgen.app.START"
         const val ACTION_RETRY = "it.shortsgen.app.RETRY"
         const val ACTION_CANCEL = "it.shortsgen.app.CANCEL"
+        const val ACTION_REPLACE_CLIP = "it.shortsgen.app.REPLACE_CLIP"
+        const val EXTRA_SCENE = "scene"
         private const val CHANNEL_PROGRESS = "generation_progress"
         private const val CHANNEL_DONE = "generation_done"
         private const val NOTIFICATION_PROGRESS = 1
@@ -178,6 +219,14 @@ class GenerationService : Service() {
         fun start(context: Context, retry: Boolean) {
             val intent = Intent(context, GenerationService::class.java)
                 .setAction(if (retry) ACTION_RETRY else ACTION_START)
+            ContextCompat.startForegroundService(context, intent)
+        }
+
+        /** "Cambia clip" per la scena [scene] (0 = prima scena) dell'ultimo video. */
+        fun replaceClip(context: Context, scene: Int) {
+            val intent = Intent(context, GenerationService::class.java)
+                .setAction(ACTION_REPLACE_CLIP)
+                .putExtra(EXTRA_SCENE, scene)
             ContextCompat.startForegroundService(context, intent)
         }
 

@@ -51,6 +51,7 @@ object ScriptParser {
 
         val topic = obj.string("topic")?.trim().takeUnless { it.isNullOrEmpty() } ?: title
         val theme = cleanQueries(listOfNotNull(obj.string("theme"))).firstOrNull().orEmpty()
+        val themeQueries = cleanQueries(stringList(obj["theme_queries"] ?: obj["themeQueries"]), max = 5)
 
         return VideoScript(
             topic = topic.take(120),
@@ -59,6 +60,7 @@ object ScriptParser {
             tags = tags.distinctBy { it.lowercase() }.take(15),
             scenes = scenes.take(SCENE_COUNT),
             theme = theme,
+            themeQueries = themeQueries,
         )
     }
 
@@ -85,12 +87,12 @@ object ScriptParser {
     )
 
     /** Ricerche pulite: minuscole, 1-4 parole, senza duplicati e senza query solo astratte. */
-    fun cleanQueries(raw: List<String>): List<String> =
+    fun cleanQueries(raw: List<String>, max: Int = 3): List<String> =
         raw.map { it.lowercase().replace(Regex("[^a-z0-9 ]"), " ").replace(Regex("\\s+"), " ").trim() }
             .map { it.split(" ").take(4).joinToString(" ") }
             .filter { q -> q.isNotEmpty() && q.split(" ").any { it !in ABSTRACT && it.length > 2 } }
             .distinct()
-            .take(3)
+            .take(max)
 
     private fun parseTags(element: JsonElement?): List<String> {
         val items = when (element) {

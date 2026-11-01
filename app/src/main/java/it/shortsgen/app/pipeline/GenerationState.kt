@@ -80,6 +80,14 @@ object GenerationRepository {
         if (state is GenerationState.Success) _lastResult.value = state.result
     }
 
+    /** Messaggio da mostrare nella schermata del risultato (es. esito di "Cambia clip"). */
+    private val _notice = MutableStateFlow<String?>(null)
+    val notice: StateFlow<String?> = _notice.asStateFlow()
+
+    fun setNotice(message: String?) {
+        _notice.value = message
+    }
+
     fun setLastResult(result: GenerationResult?) {
         _lastResult.value = result
     }

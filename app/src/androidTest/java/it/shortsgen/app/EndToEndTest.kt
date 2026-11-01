@@ -156,12 +156,33 @@ class EndToEndTest {
         File(job, "timeline.json").copyTo(File(out, "timeline.json"), overwrite = true)
         File(job, "media.json").copyTo(File(out, "media.json"), overwrite = true)
 
+        // --- "Cambia clip" sulla scena 2 (solo se ci sono chiavi per le immagini) ---
+        var replaceOk = true
+        if (pexels.isNotEmpty() || pixabay.isNotEmpty() || (cfAccount.isNotEmpty() && cfToken.isNotEmpty())) {
+            val before = media[1].sourceId
+            try {
+                val replaced = pipeline.replaceClip(result, 1)
+                val after = Http.json.decodeFromString(Manifest.serializer(), File(job, "media.json").readText()).media
+                val (v2, _) = trackDurations(File(replaced.videoPath))
+                replaceOk = after[1].sourceId != before && after.map { it.sourceId }.toSet().size == after.size &&
+                    v2 >= timeline.totalMs - 300
+                line("Cambia clip scena 2: $before → ${after[1].sourceId}; durata dopo ${v2} ms")
+                line("LOG SCENA 2 DOPO: ${replaced.sceneLog.getOrNull(1)}")
+            } catch (e: Exception) {
+                replaceOk = false
+                line("Cambia clip scena 2 FALLITO: ${e.message}")
+            }
+        } else {
+            line("Cambia clip: non provato (nessuna chiave per le immagini)")
+        }
+
         val durationOk = videoTrackMs >= timeline.totalMs - 300 && audioTrackMs >= timeline.totalMs - lastScene.durationMs / 2
         val checks = listOf(
             "nessun segnaposto" to (placeholders == 0),
             "nessun file ripetuto" to duplicates.isEmpty(),
             "sottotitoli completi" to subs.ok,
             "durata completa" to durationOk,
+            "cambia clip" to replaceOk,
         )
         checks.forEach { (name, ok) -> line("CONTROLLO $name: ${if (ok) "OK" else "FALLITO"}") }
         File(out, "report.txt").writeText(report.toString())
@@ -247,6 +268,7 @@ class EndToEndTest {
                     searchQueries = listOf("earth from space", "planet earth", "ocean sunset")),
             ),
             theme = "ocean",
+            themeQueries = listOf("ocean waves", "underwater", "sea", "beach"),
         )
     }
 }

@@ -40,7 +40,7 @@ class MediaCollectorTest {
 
     private fun collector(vararg providers: ImageProvider, logs: MutableList<String> = mutableListOf()) = MediaCollector(
         providers = providers.toList(),
-        placeholder = { i, dir -> SceneMedia(MediaKind.IMAGE, File(dir, "ph$i.jpg").path, "segnaposto", "ph-$i", true) },
+        placeholder = { r, dir -> SceneMedia(MediaKind.IMAGE, File(dir, "card${r.sceneIndex}.jpg").path, "scheda grafica", "card-${r.sceneIndex}", true) },
         retryDelayMs = 1,
         pauseBetweenScenesMs = 0,
         log = { logs += it },
@@ -83,7 +83,7 @@ class MediaCollectorTest {
         val result = collector(primary, secondary, logs = logs).collect(requests(2), tmp.root)
         assertTrue(result.media[0].placeholder)
         assertFalse(result.media[1].placeholder)
-        assertTrue(result.warnings.any { it.contains("scena 1 senza immagine") })
+        assertTrue(result.warnings.any { it.contains("scena 1 senza clip né foto") && it.contains("scheda grafica") })
         assertTrue(logs.any { it.contains("ATTENZIONE") })
     }
 
@@ -111,14 +111,59 @@ class MediaCollectorTest {
         val infos = mutableListOf<String>()
         val c = MediaCollector(
             providers = listOf(Fake("Pixabay")),
-            placeholder = { i, dir -> SceneMedia(MediaKind.IMAGE, File(dir, "ph$i.jpg").path, "segnaposto", "ph-$i", true) },
+            placeholder = { r, dir -> SceneMedia(MediaKind.IMAGE, File(dir, "card${r.sceneIndex}.jpg").path, "scheda grafica", "card-${r.sceneIndex}", true) },
             pauseBetweenScenesMs = 0,
             info = { infos += it },
         )
         val result = c.collect(requests(2), tmp.root)
         assertEquals(2, result.sceneLog.size)
         assertEquals(result.sceneLog, infos)
-        assertTrue(infos[0].startsWith("Scena 1 | query usata: \"q0\" | Pixabay Pixabay-0"))
+        assertTrue(infos[0], infos[0].startsWith("Scena 1 | ramo: clip – query della scena | query usata: \"q0\" | Pixabay Pixabay-0"))
         assertTrue(infos[0].contains("file: Pixabay-0.mp4"))
+    }
+
+    @Test
+    fun branchTellsSceneOrThemeQueryAndCard() {
+        val request = MediaRequest(0, listOf("seed pod", "seed close up", "tree", "forest"), "p", 5_000, sceneQueryCount = 2)
+        fun media(q: String, kind: MediaKind = MediaKind.VIDEO) = SceneMedia(kind, "f", "Pixabay", "x", query = q)
+        assertEquals("clip – query della scena", MediaCollector.branchOf(request, media("seed close up")))
+        assertEquals("clip – query del tema", MediaCollector.branchOf(request, media("forest")))
+        assertEquals("foto – query del tema", MediaCollector.branchOf(request, media("tree", MediaKind.IMAGE)))
+        assertEquals(MediaCollector.BRANCH_CARD, MediaCollector.branchOf(request, SceneMedia(MediaKind.IMAGE, "f", "scheda grafica", "c", placeholder = true)))
+    }
+
+    @Test
+    fun cardIsUsedOnlyWhenEverythingFailsAndIsLogged() = runTest {
+        val infos = mutableListOf<String>()
+        val none = { _: Int -> GenerationException("nessun risultato") }
+        val c = MediaCollector(
+            providers = listOf(Fake("Pixabay", none)),
+            placeholder = { r, dir -> SceneMedia(MediaKind.IMAGE, File(dir, "card.jpg").path, "scheda grafica", "card-0", true) },
+            pauseBetweenScenesMs = 0,
+            info = { infos += it },
+        )
+        val result = c.collect(listOf(MediaRequest(0, listOf("seed pod", "tree"), "p", 5_000, sceneQueryCount = 1, keyword = "seed pod")), tmp.root)
+        assertTrue(result.media.single().placeholder)
+        assertTrue(infos.single(), infos.single().contains("ramo: scheda grafica"))
+        assertTrue(infos.single().contains("parola: \"seed pod\""))
+    }
+
+    @Test
+    fun replaceFindsADifferentFileAndPrefersSameService() = runTest {
+        val pexels = Fake("Pexels")
+        val pixabay = Fake("Pixabay", { _: Int -> "pixabay-new" })
+        val c = collector(pexels, pixabay)
+        val request = MediaRequest(2, listOf("coral reef", "ocean"), "p", 5_000, sceneQueryCount = 1)
+        val (media, line) = c.replace(request, tmp.root, excludedIds = setOf("pixabay-old"), preferredSource = "Pixabay")!!
+        assertEquals("pixabay-new", media.sourceId)
+        assertEquals(0, pexels.calls)
+        assertTrue(line, line.contains("ramo: cambio clip – clip – query della scena"))
+    }
+
+    @Test
+    fun replaceReturnsNullWhenNothingElseIsFound() = runTest {
+        val none = { _: Int -> GenerationException("nessun altro risultato") }
+        val c = collector(Fake("Pixabay", none, none, none))
+        assertEquals(null, c.replace(MediaRequest(0, listOf("x"), "p", 1, 1), tmp.root, emptySet(), "Pixabay"))
     }
 }

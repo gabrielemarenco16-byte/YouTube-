@@ -32,12 +32,42 @@ object KeywordExtractor {
     private fun clean(q: String) =
         q.trim().lowercase().replace(Regex("[^a-z0-9 ]"), " ").replace(Regex("\\s+"), " ").trim()
 
+    /** Ricerche per una scena: specifiche + del tema, con il numero di quelle specifiche. */
+    data class SceneQueries(val all: List<String>, val sceneCount: Int)
+
     /**
      * Ricerche per una scena, nell'ordine in cui vanno provate:
-     * 1) le query visive generate dall'LLM (massimo 3);
-     *    se mancano, parole chiave ricavate dalla scena;
-     * 2) la query generica del tema del video (es. "chemistry", "fire", "space").
+     * 1) le query visive della scena generate dall'LLM (massimo 3; se mancano, parole chiave ricavate dalla scena);
+     * 2) le query generiche del tema (es. "tree", "forest", "seed pod", "plant") e il tema stesso.
      */
+    fun sceneQueries(
+        llmQueries: List<String>,
+        theme: String,
+        themeQueries: List<String> = emptyList(),
+        searchQuery: String = "",
+        imagePrompt: String = "",
+        narration: String = "",
+        topic: String = "",
+    ): SceneQueries {
+        val scene = mutableListOf<String>()
+        fun addTo(list: MutableList<String>, q: String) {
+            val c = clean(q)
+            if (c.isNotEmpty() && c !in list) list += c
+        }
+        llmQueries.take(3).forEach { addTo(scene, it) }
+        if (scene.isEmpty()) {
+            addTo(scene, searchQuery)
+            addTo(scene, keywords(imagePrompt, 3))
+            addTo(scene, keywords(narration, 3))
+        }
+        val generic = mutableListOf<String>()
+        themeQueries.take(5).forEach { addTo(generic, it) }
+        addTo(generic, clean(theme).ifEmpty { keywords(topic, 1) }.ifEmpty { GENERIC.first() })
+        val themePart = generic.filter { it !in scene }
+        return SceneQueries(scene + themePart, scene.size)
+    }
+
+    /** Solo l'elenco delle ricerche (vedi [sceneQueries]). */
     fun queries(
         llmQueries: List<String>,
         theme: String,
@@ -45,22 +75,6 @@ object KeywordExtractor {
         imagePrompt: String = "",
         narration: String = "",
         topic: String = "",
-    ): List<String> {
-        val list = mutableListOf<String>()
-        fun add(q: String) {
-            val c = clean(q)
-            if (c.isNotEmpty() && c !in list) list += c
-        }
-        llmQueries.take(3).forEach(::add)
-        if (list.isEmpty()) {
-            add(searchQuery)
-            add(keywords(imagePrompt, 3))
-            add(keywords(narration, 3))
-        }
-        val themeQuery = clean(theme).ifEmpty { keywords(topic, 1) }.ifEmpty { GENERIC.first() }
-        // il tema va sempre per ultimo, anche se coincide con una delle query
-        list.remove(themeQuery)
-        list += themeQuery
-        return list
-    }
+        themeQueries: List<String> = emptyList(),
+    ): List<String> = sceneQueries(llmQueries, theme, themeQueries, searchQuery, imagePrompt, narration, topic).all
 }

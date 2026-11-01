@@ -34,11 +34,11 @@ class SubtitleOverlay(
     private val fill = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        textSize = width * 0.085f
+        textSize = width * TEXT_SIZE_RATIO
     }
     private val stroke = TextPaint(fill).apply {
         style = Paint.Style.STROKE
-        strokeWidth = width * 0.016f
+        strokeWidth = width * TEXT_SIZE_RATIO * 0.19f
         strokeJoin = Paint.Join.ROUND
         color = Color.BLACK
     }
@@ -58,14 +58,10 @@ class SubtitleOverlay(
     private fun redraw(cue: SubtitleCue?) {
         bitmap.eraseColor(Color.TRANSPARENT)
         if (cue == null) return
-        val maxWidth = (width * 0.9f).toInt()
+        val maxWidth = (width * 0.86f).toInt()
         // Un gruppo su due in giallo, per dare ritmo come negli Short più visti.
         val paint = if (currentIndex % 2 == 0) fill else highlight
-        // Rimpicciolisce il testo finché sta su una riga (con un minimo leggibile; oltre va a capo).
-        val size = fitTextSize(cue.text, maxWidth)
-        paint.textSize = size
-        stroke.textSize = size
-        stroke.strokeWidth = size * 0.19f
+        // Dimensione del carattere sempre uguale: se la riga è troppo lunga va a capo (massimo 2 righe).
         val strokeLayout = layout(cue.text, stroke, maxWidth)
         val fillLayout = layout(cue.text, paint, maxWidth)
         canvas.save()
@@ -76,28 +72,19 @@ class SubtitleOverlay(
         canvas.restore()
     }
 
-    private fun fitTextSize(text: String, maxWidth: Int): Float {
-        val probe = TextPaint(fill)
-        var size = width * 0.085f
-        val min = width * 0.055f
-        probe.textSize = size
-        // margine per il bordo nero
-        while (size > min && probe.measureText(text) + size * 0.4f > maxWidth) {
-            size -= 2f
-            probe.textSize = size
-        }
-        return size
-    }
-
     private fun layout(text: String, paint: TextPaint, w: Int): StaticLayout =
         StaticLayout.Builder.obtain(text, 0, text.length, paint, w)
             .setAlignment(Layout.Alignment.ALIGN_CENTER)
             .setLineSpacing(0f, 0.95f)
             .setIncludePad(false)
+            .setMaxLines(2)
             .build()
 
     private companion object {
         /** Centro verticale dei sottotitoli (0 = alto, 1 = basso). */
         const val BOTTOM_POSITION = 0.75f
+
+        /** Dimensione fissa del testo rispetto alla larghezza del video (mai ridotta). */
+        const val TEXT_SIZE_RATIO = 0.085f
     }
 }

@@ -19,6 +19,8 @@ data class SceneMedia(
     val query: String = "",
     /** Descrizione breve del file scelto (es. "video 1080x1920, 15 s"). */
     val detail: String = "",
+    /** Ramo usato per trovarlo (es. "clip – query della scena", "foto – query del tema", "scheda grafica"). */
+    val branch: String = "",
 ) {
     val file: File get() = File(path)
 }
@@ -32,6 +34,10 @@ data class MediaRequest(
     val prompt: String,
     /** Durata minima che deve avere una clip video. */
     val minDurationMs: Long,
+    /** Quante delle [queries] (le prime) sono specifiche della scena; le altre sono del tema. */
+    val sceneQueryCount: Int = queries.size,
+    /** Parola chiave da mostrare sulla scheda grafica se non si trova nessuna clip né foto. */
+    val keyword: String = queries.firstOrNull().orEmpty(),
 )
 
 /**

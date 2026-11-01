@@ -16,7 +16,8 @@ import kotlin.coroutines.cancellation.CancellationException
  */
 class MediaCollector(
     private val providers: List<ImageProvider>,
-    private val placeholder: suspend (sceneIndex: Int, dir: File) -> SceneMedia,
+    /** Ultima scelta: scheda grafica con la parola chiave della scena. */
+    private val placeholder: suspend (request: MediaRequest, dir: File) -> SceneMedia,
     private val attempts: Int = 3,
     private val retryDelayMs: Long = 2_000,
     private val pauseBetweenScenesMs: Long = 700,
@@ -78,9 +79,10 @@ class MediaCollector(
                     }
                 }
             }
-            val result = found ?: placeholder(i, dir).also {
+            val result = (found?.let { it.copy(branch = branchOf(request, it)) }) ?: placeholder(request, dir).copy(branch = BRANCH_CARD).also {
                 val reason = errors.lastOrNull() ?: "nessun servizio di immagini configurato"
-                val warning = "ATTENZIONE: scena ${i + 1} senza immagine (segnaposto). Causa: $reason"
+                val warning = "ATTENZIONE: scena ${i + 1} senza clip né foto: usata una scheda grafica con " +
+                    "\"${request.keyword.uppercase()}\". Causa: $reason"
                 log(warning)
                 warnings += warning
             }
@@ -92,17 +94,54 @@ class MediaCollector(
         return Result(media, warnings.distinct(), sceneLog)
     }
 
+    /**
+     * "Cambia clip": cerca un altro file per una sola scena, escludendo [excludedIds]
+     * (tutti i file del video e quelli già scartati). Prova prima il servizio [preferredSource].
+     * Restituisce null se non trova nulla (la scena resta com'era).
+     */
+    suspend fun replace(request: MediaRequest, dir: File, excludedIds: Set<String>, preferredSource: String?): Pair<SceneMedia, String>? {
+        val ordered = providers.sortedBy { if (it.name == preferredSource) 0 else 1 }
+        for (provider in ordered) {
+            try {
+                val found = retry(times = attempts, initialDelayMs = retryDelayMs, shouldRetry = ::isRetryable) {
+                    provider.fetch(request, dir, excludedIds)
+                }
+                val media = found.copy(branch = "cambio clip – " + branchOf(request, found))
+                val line = describe(request.sceneIndex, request, media, reused = false)
+                info(line)
+                return media to line
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                log("Cambio clip scena ${request.sceneIndex + 1}: ${provider.name} non ha trovato altro: ${e.message}")
+            }
+        }
+        return null
+    }
+
     private fun describe(i: Int, request: MediaRequest, m: SceneMedia, reused: Boolean, cause: String? = null): String {
         val tried = "ricerche: ${request.queries.joinToString(" → ") { "\"$it\"" }}"
         return if (m.placeholder) {
-            "Scena ${i + 1} | SEGNAPOSTO | $tried | causa: ${cause ?: "nessun servizio configurato"}"
+            "Scena ${i + 1} | ramo: ${m.branch.ifEmpty { BRANCH_CARD }} | parola: \"${request.keyword}\" | file: ${m.file.name} | " +
+                "$tried | causa: ${cause ?: "nessun servizio configurato"}"
         } else {
-            "Scena ${i + 1} | query usata: \"${m.query}\" | ${m.source} ${m.sourceId} (${m.detail}) | file: ${m.file.name}" +
-                (if (reused) " | riutilizzato da tentativo precedente" else "") + " | $tried"
+            "Scena ${i + 1} | ramo: ${m.branch} | query usata: \"${m.query}\" | ${m.source} ${m.sourceId} (${m.detail}) | " +
+                "file: ${m.file.name}" + (if (reused) " | riutilizzato da tentativo precedente" else "") + " | $tried"
         }
     }
 
     companion object {
+        const val BRANCH_CARD = "scheda grafica (nessuna clip né foto trovata)"
+
+        /** Quale ramo ha prodotto il file: clip/foto, query della scena o del tema, immagine AI. */
+        fun branchOf(request: MediaRequest, m: SceneMedia): String {
+            if (m.placeholder) return BRANCH_CARD
+            if (m.query == "(immagine AI)") return "immagine AI"
+            val index = request.queries.indexOf(m.query)
+            val origin = if (index in 0 until request.sceneQueryCount) "query della scena" else "query del tema"
+            return (if (m.kind == MediaKind.VIDEO) "clip" else "foto") + " – " + origin
+        }
+
         fun isConfigError(e: Throwable): Boolean =
             e is MissingKeyException || (e is ApiException && (e.code == 401 || e.code == 403))
 

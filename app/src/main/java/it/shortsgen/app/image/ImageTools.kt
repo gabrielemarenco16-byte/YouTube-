@@ -85,4 +85,57 @@ object ImageTools {
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), glow)
         return bmp
     }
+
+    private val ACCENTS = intArrayOf(
+        0xFFFF3D57.toInt(), 0xFF38BDF8.toInt(), 0xFFFBBF24.toInt(), 0xFF34D399.toInt(),
+        0xFFA78BFA.toInt(), 0xFFF472B6.toInt(), 0xFFFB923C.toInt(),
+    )
+
+    /**
+     * Scheda grafica pulita, usata solo se nessuna clip o foto è disponibile:
+     * sfondo scuro uniforme, un cerchio colorato e la parola chiave della scena in grande.
+     * La parola sta in alto rispetto ai sottotitoli, che restano in basso.
+     */
+    fun keywordCard(keyword: String, index: Int, width: Int = VIDEO_WIDTH, height: Int = VIDEO_HEIGHT): Bitmap {
+        val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bmp)
+        canvas.drawColor(Color.rgb(17, 20, 32))
+        val accent = ACCENTS[index % ACCENTS.size]
+        val cx = width / 2f
+        val cy = height * 0.40f
+        val radius = width * 0.36f
+        // cerchio pieno molto tenue + anello del colore d'accento
+        canvas.drawCircle(cx, cy, radius, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = accent
+            alpha = 38
+        })
+        canvas.drawCircle(cx, cy, radius, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = width * 0.012f
+            color = accent
+        })
+        val text = keyword.trim().uppercase().ifEmpty { "?" }
+        val paint = android.text.TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+            textSize = width * 0.11f
+            letterSpacing = 0.04f
+        }
+        val maxWidth = (radius * 1.7f).toInt()
+        // riduce solo la scheda (non i sottotitoli) finché la parola sta in 2 righe dentro il cerchio
+        var layout: android.text.StaticLayout
+        do {
+            layout = android.text.StaticLayout.Builder.obtain(text, 0, text.length, paint, maxWidth)
+                .setAlignment(android.text.Layout.Alignment.ALIGN_CENTER)
+                .setIncludePad(false)
+                .build()
+            if (layout.lineCount <= 2 && (0 until layout.lineCount).all { layout.getLineWidth(it) <= maxWidth }) break
+            paint.textSize *= 0.9f
+        } while (paint.textSize > width * 0.05f)
+        canvas.save()
+        canvas.translate(cx - maxWidth / 2f, cy - layout.height / 2f)
+        layout.draw(canvas)
+        canvas.restore()
+        return bmp
+    }
 }

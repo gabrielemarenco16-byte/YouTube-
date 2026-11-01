@@ -32,12 +32,15 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,6 +53,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import it.shortsgen.app.pipeline.GenerationRepository
+import it.shortsgen.app.pipeline.GenerationService
+import it.shortsgen.app.pipeline.GenerationState
 import it.shortsgen.app.pipeline.GenerationResult
 import java.io.File
 
@@ -60,6 +67,9 @@ fun ResultScreen(result: GenerationResult, onBack: () -> Unit) {
     val videoFile = remember(result) { File(result.videoPath) }
     val thumbFile = remember(result) { File(result.thumbnailPath) }
     val tagsText = remember(result) { result.tags.joinToString(", ") }
+    val state by GenerationRepository.state.collectAsStateWithLifecycle()
+    val notice by GenerationRepository.notice.collectAsStateWithLifecycle()
+    val busy = state is GenerationState.Running
 
     fun saveAll() {
         val videoOk = MediaActions.saveToGallery(context, videoFile, isVideo = true)
@@ -108,6 +118,23 @@ fun ResultScreen(result: GenerationResult, onBack: () -> Unit) {
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            (state as? GenerationState.Running)?.let { running ->
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Sto rimontando il video…", fontWeight = FontWeight.Bold)
+                        LinearProgressIndicator(progress = { running.progress }, modifier = Modifier.fillMaxWidth())
+                        Text(running.detail, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+            notice?.let { message ->
+                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+                    Row(Modifier.padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(message, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                        TextButton(onClick = { GenerationRepository.setNotice(null) }) { Text("OK") }
+                    }
+                }
+            }
             if (result.warnings.isNotEmpty()) {
                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)) {
                     Text(
@@ -126,8 +153,8 @@ fun ResultScreen(result: GenerationResult, onBack: () -> Unit) {
                     .background(Color.Black)
                     .align(Alignment.CenterHorizontally),
             ) {
-                if (videoFile.exists()) {
-                    VideoPreview(videoFile)
+                if (videoFile.exists() && !busy) {
+                    key(result.createdAt) { VideoPreview(videoFile) }
                 } else {
                     Text("File video non trovato", color = Color.White, modifier = Modifier.align(Alignment.Center))
                 }
@@ -135,17 +162,18 @@ fun ResultScreen(result: GenerationResult, onBack: () -> Unit) {
             Text("Durata: ${result.durationSec} secondi", style = MaterialTheme.typography.bodySmall)
 
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                Button(onClick = { onSaveClick() }, modifier = Modifier.weight(1f)) { Text("Salva in galleria") }
+                Button(onClick = { onSaveClick() }, enabled = !busy, modifier = Modifier.weight(1f)) { Text("Salva in galleria") }
                 OutlinedButton(
                     onClick = {
                         MediaActions.share(context, videoFile, "video/mp4", result.title)
                     },
+                    enabled = !busy,
                     modifier = Modifier.weight(1f),
                 ) { Text("Condividi") }
             }
 
             Text("Copertina (1280x720)", fontWeight = FontWeight.Bold)
-            val thumb = remember(result) {
+            val thumb = remember(result.createdAt) {
                 runCatching { BitmapFactory.decodeFile(thumbFile.absolutePath)?.asImageBitmap() }.getOrNull()
             }
             if (thumb != null) {
@@ -167,8 +195,30 @@ fun ResultScreen(result: GenerationResult, onBack: () -> Unit) {
             CopyField("Descrizione", result.description, onCopy = ::copy)
             CopyField("Tag", tagsText, onCopy = ::copy)
             if (result.sceneLog.isNotEmpty()) {
+                Text("Scene", fontWeight = FontWeight.Bold)
+                result.sceneLog.forEachIndexed { index, line ->
+                    SceneRow(index, line, enabled = !busy) { GenerationService.replaceClip(context, index) }
+                }
                 CopyField("Dettagli scene (query e file)", result.sceneLog.joinToString("\n"), onCopy = ::copy)
             }
+        }
+    }
+}
+
+/** Una scena: riassunto di ramo/query/file e pulsante per cambiare la clip. */
+@Composable
+private fun SceneRow(index: Int, logLine: String, enabled: Boolean, onReplace: () -> Unit) {
+    val parts = logLine.split(" | ")
+    val summary = parts.drop(1).filter { p ->
+        p.startsWith("ramo:") || p.startsWith("query usata:") || p.startsWith("parola:") || p.startsWith("file:")
+    }.joinToString("\n")
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Scena ${index + 1}", fontWeight = FontWeight.Bold)
+                Text(summary.ifEmpty { logLine }, style = MaterialTheme.typography.bodySmall)
+            }
+            OutlinedButton(onClick = onReplace, enabled = enabled) { Text("Cambia clip") }
         }
     }
 }

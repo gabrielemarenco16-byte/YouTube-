@@ -197,57 +197,133 @@ class GenerationPipeline(
     }
 
     @Serializable
-    private data class MediaManifest(val media: List<SceneMedia>)
+    private data class MediaManifest(
+        val media: List<SceneMedia>,
+        /** File scartati con "Cambia clip": non vanno più riproposti in questo video. */
+        val rejected: List<String> = emptyList(),
+    )
 
-    private suspend fun mediaStep(jobDir: File, script: VideoScript, timeline: Timeline): List<SceneMedia> {
-        val manifestFile = File(jobDir, "media.json")
-        val existing = runCatching {
-            Http.json.decodeFromString(MediaManifest.serializer(), manifestFile.readText()).media
-        }.getOrDefault(emptyList())
+    private fun readManifest(jobDir: File): MediaManifest? = runCatching {
+        Http.json.decodeFromString(MediaManifest.serializer(), File(jobDir, "media.json").readText())
+    }.getOrNull()
 
-        val requests = script.scenes.mapIndexed { i, scene ->
+    private fun writeManifest(jobDir: File, manifest: MediaManifest) =
+        File(jobDir, "media.json").writeText(Http.json.encodeToString(MediaManifest.serializer(), manifest))
+
+    private fun buildRequests(script: VideoScript, timeline: Timeline): List<MediaRequest> =
+        script.scenes.mapIndexed { i, scene ->
+            val q = KeywordExtractor.sceneQueries(
+                llmQueries = scene.searchQueries,
+                theme = script.theme,
+                themeQueries = script.themeQueries,
+                searchQuery = scene.searchQuery,
+                imagePrompt = scene.imagePrompt,
+                narration = scene.narration,
+                topic = script.topic,
+            )
             MediaRequest(
                 sceneIndex = i,
-                queries = KeywordExtractor.queries(
-                    llmQueries = scene.searchQueries,
-                    theme = script.theme,
-                    searchQuery = scene.searchQuery,
-                    imagePrompt = scene.imagePrompt,
-                    narration = scene.narration,
-                    topic = script.topic,
-                ),
+                queries = q.all,
                 prompt = Prompts.imagePrompt(scene.imagePrompt),
                 minDurationMs = timeline.scenes[i].durationMs,
+                sceneQueryCount = q.sceneCount,
+                keyword = q.all.firstOrNull() ?: KeywordExtractor.keywords(scene.narration, 2),
             )
         }
-        val collector = MediaCollector(
-            providers = imageProviders(),
-            placeholder = { index, dir ->
-                withContext(Dispatchers.Default) {
-                    val file = File(dir, "scene_${index + 1}.jpg")
-                    val bmp = ImageTools.placeholder(index)
-                    ImageTools.saveJpeg(bmp, file)
-                    bmp.recycle()
-                    SceneMedia(MediaKind.IMAGE, file.absolutePath, "segnaposto", "placeholder-$index", placeholder = true)
-                }
-            },
-            log = { Log.w(TAG, it) },
-            info = { Log.i(MEDIA_TAG, it) },
-            onStatus = { i, text -> report(Phase.IMAGES, i.toFloat() / script.scenes.size, text) },
-        )
-        val result = collector.collect(requests, jobDir, existing)
-        manifestFile.writeText(Http.json.encodeToString(MediaManifest.serializer(), MediaManifest(result.media)))
+
+    /** Ultima scelta: scheda grafica con la parola chiave della scena (sfondo scuro uniforme). */
+    private suspend fun keywordCard(request: MediaRequest, dir: File): SceneMedia = withContext(Dispatchers.Default) {
+        val file = File(dir, "scene_${request.sceneIndex + 1}_card.jpg")
+        val bmp = ImageTools.keywordCard(request.keyword, request.sceneIndex)
+        ImageTools.saveJpeg(bmp, file)
+        bmp.recycle()
+        SceneMedia(MediaKind.IMAGE, file.absolutePath, "scheda grafica", "card-${request.sceneIndex}", placeholder = true)
+    }
+
+    private fun collector(sceneCount: Int) = MediaCollector(
+        providers = imageProviders(),
+        placeholder = { request, dir -> keywordCard(request, dir) },
+        log = { Log.w(TAG, it) },
+        info = { Log.i(MEDIA_TAG, it) },
+        onStatus = { i, text -> report(Phase.IMAGES, i.toFloat() / sceneCount, text) },
+    )
+
+    private suspend fun mediaStep(jobDir: File, script: VideoScript, timeline: Timeline): List<SceneMedia> {
+        val existing = readManifest(jobDir)?.media.orEmpty()
+        val requests = buildRequests(script, timeline)
+        val result = collector(script.scenes.size).collect(requests, jobDir, existing)
+        writeManifest(jobDir, MediaManifest(result.media))
         warnings += result.warnings
         sceneLog = result.sceneLog
         File(jobDir, "scene_log.txt").writeText(result.sceneLog.joinToString("\n"))
 
         if (requireRealMedia && result.placeholderCount == script.scenes.size) {
             // Nessuna scena riuscita: quasi sempre chiave mancante o non valida. Meglio fermarsi.
-            throw GenerationException("Nessuna immagine o video trovato. ${result.warnings.firstOrNull().orEmpty()}")
+            throw GenerationException("Nessuna clip o foto trovata. ${result.warnings.firstOrNull().orEmpty()}")
         }
         val videos = result.media.count { it.kind == MediaKind.VIDEO && !it.placeholder }
         report(Phase.IMAGES, 1f, "Pronte ${result.media.size} scene ($videos clip video)")
         return result.media
+    }
+
+    /**
+     * "Cambia clip" per una scena: cerca un altro file con la stessa query (poi le altre della scena
+     * e del tema), lo sostituisce e rifà SOLO il montaggio e la copertina. Copione e voce restano.
+     */
+    suspend fun replaceClip(previous: GenerationResult, sceneIndex: Int): GenerationResult {
+        val jobDir = File(previous.jobDir)
+        val script = Http.json.decodeFromString(VideoScript.serializer(), File(jobDir, "script.json").readText())
+        val timeline = Http.json.decodeFromString(Timeline.serializer(), File(jobDir, "timeline.json").readText())
+        val manifest = readManifest(jobDir) ?: throw GenerationException("Dati delle scene non trovati: genera un nuovo video.")
+        val narration = File(jobDir, "narration.wav")
+        if (!narration.exists()) throw GenerationException("Audio del video non trovato: genera un nuovo video.")
+        val current = manifest.media.getOrNull(sceneIndex) ?: throw GenerationException("Scena ${sceneIndex + 1} non trovata.")
+
+        report(Phase.IMAGES, 0.2f, "Scena ${sceneIndex + 1}: cerco un'altra clip…")
+        val base = buildRequests(script, timeline)[sceneIndex]
+        // prima la stessa query che aveva trovato il file attuale
+        val sameQueryFirst = (listOfNotNull(current.query.takeIf { it.isNotBlank() && !current.placeholder }) + base.queries).distinct()
+        val request = base.copy(
+            queries = sameQueryFirst,
+            sceneQueryCount = if (sameQueryFirst.size > base.queries.size) base.sceneQueryCount + 1 else base.sceneQueryCount,
+        )
+        val excluded = (manifest.media.map { it.sourceId } + manifest.rejected).toSet()
+        val replacementDir = File(jobDir, "replace_${System.currentTimeMillis()}").apply { mkdirs() }
+        val found = collector(script.scenes.size).replace(
+            request, replacementDir, excluded, preferredSource = current.source.takeIf { !current.placeholder },
+        ) ?: run {
+            replacementDir.deleteRecursively()
+            throw GenerationException(
+                "Nessun'altra clip trovata per la scena ${sceneIndex + 1} (ricerche: ${request.queries.joinToString(", ")}). " +
+                    "Il video non è stato modificato."
+            )
+        }
+        val (newMedia, logLine) = found
+        val media = manifest.media.toMutableList().also { it[sceneIndex] = newMedia }
+        Log.i(MEDIA_TAG, "Cambio clip scena ${sceneIndex + 1}: ${current.sourceId} → ${newMedia.sourceId}")
+
+        // montaggio su un file nuovo: se fallisce, il video precedente resta intatto
+        val tmp = File(jobDir, "short_new.mp4")
+        videoStep(media, AudioPlan(narration, timeline), tmp)
+        val video = File(previous.videoPath)
+        if (!tmp.renameTo(video)) {
+            tmp.copyTo(video, overwrite = true)
+            tmp.delete()
+        }
+        writeManifest(jobDir, MediaManifest(media, manifest.rejected + current.sourceId))
+        if (sceneIndex == 0) {
+            report(Phase.THUMBNAIL, 0f, "Aggiorno la copertina…")
+            withContext(Dispatchers.Default) { ThumbnailGenerator.create(newMedia, script.title, File(previous.thumbnailPath)) }
+        }
+        val newLog = previous.sceneLog.toMutableList()
+        if (sceneIndex < newLog.size) newLog[sceneIndex] = logLine else newLog += logLine
+        File(jobDir, "scene_log.txt").writeText(newLog.joinToString("\n"))
+        report(Phase.THUMBNAIL, 1f, "Clip della scena ${sceneIndex + 1} sostituita")
+        return previous.copy(
+            sceneLog = newLog,
+            warnings = previous.warnings.filterNot { it.contains("scena ${sceneIndex + 1} ") } + warnings,
+            createdAt = System.currentTimeMillis(),
+        )
     }
 
     // ---------- 4) Montaggio ----------

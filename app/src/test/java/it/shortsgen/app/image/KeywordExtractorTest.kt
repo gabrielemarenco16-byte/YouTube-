@@ -14,9 +14,9 @@ class KeywordExtractorTest {
     }
 
     @Test
-    fun themeIsAlwaysLastEvenIfRepeated() {
+    fun themeEqualToASceneQueryIsNotRepeated() {
         val q = KeywordExtractor.queries(listOf("fire", "candle flame"), theme = "fire")
-        assertEquals(listOf("candle flame", "fire"), q)
+        assertEquals(listOf("fire", "candle flame"), q)
     }
 
     @Test
@@ -29,5 +29,16 @@ class KeywordExtractorTest {
         )
         assertEquals("ancient egyptian pyramids", q.first())
         assertEquals("pyramids", q.last())
+    }
+
+    @Test
+    fun sceneQueriesThenThemeQueriesThenTheme() {
+        val q = KeywordExtractor.sceneQueries(
+            llmQueries = listOf("seed pod", "dandelion seeds", "wind"),
+            theme = "plants",
+            themeQueries = listOf("tree", "forest", "seed pod", "plant"),
+        )
+        assertEquals(listOf("seed pod", "dandelion seeds", "wind", "tree", "forest", "plant", "plants"), q.all)
+        assertEquals(3, q.sceneCount)
     }
 }

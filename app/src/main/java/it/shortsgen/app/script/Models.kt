@@ -22,4 +22,6 @@ data class VideoScript(
     val scenes: List<Scene>,
     /** Tema visivo generico del video (es. "chemistry", "fire", "space"): ricerca di riserva. */
     val theme: String = "",
+    /** Ricerche generiche e concrete legate al tema (es. "tree", "forest", "seed pod", "plant"). */
+    @SerialName("theme_queries") val themeQueries: List<String> = emptyList(),
 )

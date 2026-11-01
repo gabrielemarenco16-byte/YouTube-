@@ -24,6 +24,7 @@ Write everything in English. Reply ONLY with a JSON object, no markdown, with ex
   "description": "2-3 engaging sentences followed by 3-5 hashtags including #shorts",
   "tags": ["8 to 12 short tags"],
   "theme": "one or two generic English words for the overall visual theme, e.g. chemistry, fire, space, ocean",
+  "theme_queries": ["4 to 5 simple, very common things related to the theme that are easy to film"],
   "scenes": [
     {"narration": "what the narrator says", "image_prompt": "description of the image for this scene", "search_queries": ["first visual query", "second visual query", "third visual query"]}
   ]
@@ -36,6 +37,7 @@ Rules:
 - Each narration is 15 to 22 words; the whole script is 110 to 145 words (about 40-50 seconds of speech).
 - Narration is plain spoken text: no emojis, no hashtags, no stage directions, no brackets.
 - Each scene has exactly 3 search_queries for a stock video site, best first. Each query is 1 to 3 concrete English words naming things a camera can film: objects, animals, places or actions (for example "octopus swimming", "coral reef", "lab test tubes", "candle flame", "night sky stars"). NEVER abstract concepts (no "mystery", "fact", "science", "history", "danger", "idea"), no names of people, no brands. Make the 3 queries different from each other and simpler from the first to the third.
+- "theme_queries" are 4 or 5 generic but concrete subjects linked to the theme, one or two words each, that every stock video site has (for a video about seeds: "tree", "forest", "seed pod", "plant", "flower field"). They are used when a scene's own queries find nothing.
 - "theme" is a very common visual subject for the whole video that always has stock footage (for example "chemistry", "fire", "space", "ocean", "forest", "city").
 - Each image_prompt is a vivid, detailed description for an AI image generator: vertical 9:16 composition, photorealistic or cinematic, dramatic lighting, and it must not contain any text, letters, logos or watermarks.
 """.trim()
