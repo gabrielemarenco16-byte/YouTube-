@@ -54,4 +54,23 @@ class PeopleAndMotionTest {
         assertEquals(0.0, MotionMath.score(listOf(black, black, black)), 1e-9)
         assertTrue(MotionMath.score(listOf(black, white, black)) > 200)
     }
+
+    @Test
+    fun abstractAndGraphicClipsAreRejected() {
+        assertTrue(GraphicFilter.isGraphic("abstract, background, particles, light"))
+        assertTrue(GraphicFilter.isGraphic("jellyfish 3d render animation"))
+        assertTrue(GraphicFilter.isGraphic("motion graphics ocean waves"))
+        assertFalse(GraphicFilter.isGraphic("jellyfish, sea, ocean, underwater"))
+        // se il soggetto stesso è "fractal", la parola non fa scartare il file
+        assertFalse(GraphicFilter.isGraphic("fractal broccoli romanesco", subject = "fractal broccoli"))
+    }
+
+    @Test
+    fun pixabaySkipsAnimatedClips() {
+        val json = """{"hits":[
+            {"id":7,"duration":20,"tags":"jellyfish, animation, 3d","videos":{"large":{"url":"https://c/7.mp4","width":1080,"height":1920}}},
+            {"id":8,"duration":20,"tags":"jellyfish, sea","videos":{"large":{"url":"https://c/8.mp4","width":1080,"height":1920}}}
+        ]}"""
+        assertEquals(8L, PixabayApi.chooseVideo(PixabayApi.parseVideos(json), 5_000, emptySet(), allowPeople = false)!!.first.id)
+    }
 }

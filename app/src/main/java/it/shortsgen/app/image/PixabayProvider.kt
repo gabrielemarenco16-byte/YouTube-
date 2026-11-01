@@ -33,7 +33,7 @@ class PixabayProvider(
         }
         val n = request.sceneIndex + 1
         for (query in request.queries) {
-            val chosen = PixabayApi.chooseVideos(searchVideos(query), request.minDurationMs, usedIds, request.allowPeople, request.candidates.coerceAtLeast(1))
+            val chosen = PixabayApi.chooseVideos(searchVideos(query), request.minDurationMs, usedIds, request.allowPeople, request.candidates.coerceAtLeast(1), request.subject)
             if (chosen.isEmpty()) continue
             return chosen.mapIndexed { k, (video, file) ->
                 val target = File(dir, if (chosen.size == 1) "scene_$n.mp4" else "scene_${n}_c${k + 1}.mp4")
@@ -48,7 +48,7 @@ class PixabayProvider(
         }
         for (query in request.queries) {
             val photo = searchPhotos(query).firstOrNull {
-                PixabayApi.photoId(it.id) !in usedIds && PeopleFilter.allowed(it.description, request.allowPeople)
+                PixabayApi.photoId(it.id) !in usedIds && ClipFilter.allowed(it.description, request.allowPeople, request.subject)
             } ?: continue
             val downloaded = File(dir, "scene_$n.download")
             val target = File(dir, "scene_$n.jpg")

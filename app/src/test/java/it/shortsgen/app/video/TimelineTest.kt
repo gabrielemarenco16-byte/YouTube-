@@ -2,6 +2,7 @@ package it.shortsgen.app.video
 
 import it.shortsgen.app.voice.WordTiming
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -10,52 +11,54 @@ class TimelineTest {
     private fun timings(text: String) = text.split(" ").mapIndexed { i, w -> WordTiming(w, i * 100L, i * 100L + 90) }
 
     @Test
-    fun chunksThreeWordsAtATimeWithoutLoneWord() {
+    fun groupsOfThreeOrFourWords() {
         val cues = SubtitleChunker.chunk(timings("one two three four five six seven"))
-        assertEquals(listOf("one two three", "four five", "six seven"), cues.map { it.text })
+        assertEquals(listOf("one two three four", "five six seven"), cues.map { it.text })
         assertEquals(0L, cues[0].startMs)
         // il primo sottotitolo resta fino all'inizio del secondo
-        assertEquals(300L, cues[0].endMs)
+        assertEquals(400L, cues[0].endMs)
     }
 
     @Test
     fun splitsAtSentencesAndCommasNeverOneWordAlone() {
         val cues = SubtitleChunker.chunk(timings("Honey never spoils, even after thousands of years. Archaeologists found edible honey in Egyptian tombs."))
         assertEquals(
-            // frasi: "Honey never spoils," | "even after thousands of years." (5 = 3+2) | 7 parole = 3+2+2
-            listOf("Honey never spoils,", "even after thousands", "of years.", "Archaeologists found edible", "honey in", "Egyptian tombs."),
+            listOf("Honey never spoils,", "even after thousands", "of years.", "Archaeologists found edible honey", "in Egyptian tombs."),
             cues.map { it.text },
         )
     }
 
     @Test
+    fun neverEndsAGroupOnArticlesPrepositionsOrConjunctions() {
+        // "for" non chiude il gruppo: passa al successivo
+        assertEquals(listOf("Follow us", "for more curiosities!"), SubtitleChunker.chunk(timings("Follow us for more curiosities!")).map { it.text })
+        assertEquals(
+            listOf("Their blood is blue", "because it uses copper,", "not iron,", "to carry oxygen."),
+            SubtitleChunker.chunk(timings("Their blood is blue because it uses copper, not iron, to carry oxygen.")).map { it.text },
+        )
+        val cues = SubtitleChunker.chunk(timings("A jellyfish is made of about ninety five percent water and has no brain at all"))
+        cues.dropLast(1).forEach { c -> assertFalse("\"${c.text}\"", SubtitleChunker.isWeakEnding(c.text.split(" ").last())) }
+    }
+
+    @Test
     fun loneWordPhraseIsJoinedToTheNextOne() {
         // "Wow." da solo non resta mai isolato
-        assertEquals(listOf("Wow. This", "is true"), SubtitleChunker.chunk(timings("Wow. This is true")).map { it.text })
+        assertEquals(listOf("Wow. This is true"), SubtitleChunker.chunk(timings("Wow. This is true")).map { it.text })
         // all'ultima frase di una parola si unisce la precedente
-        assertEquals(listOf("Follow us", "today, friends!"), SubtitleChunker.chunk(timings("Follow us today, friends!")).map { it.text })
+        assertEquals(listOf("Follow us today, friends!"), SubtitleChunker.chunk(timings("Follow us today, friends!")).map { it.text })
         assertEquals(listOf("Subscribe now. Bye!"), SubtitleChunker.chunk(timings("Subscribe now. Bye!")).map { it.text })
     }
 
     @Test
-    fun noCueHasOneWordOrMoreThanThree() {
-        val text = "Yes. The Eiffel Tower grows, in summer, by about fifteen centimeters because iron expands. Amazing, right? Follow us."
+    fun noCueHasOneWordOrMoreThanFour() {
+        val text = "Yes. The Eiffel Tower grows, in summer, by about fifteen centimeters because the iron of the tower expands in the heat. Amazing, right? Follow us."
         val cues = SubtitleChunker.chunk(timings(text))
         cues.forEach { c ->
             val n = c.text.split(" ").size
-            assertTrue("\"${c.text}\"", n in 2..3)
+            assertTrue("\"${c.text}\"", n in 2..4)
+            assertFalse("\"${c.text}\"", SubtitleChunker.isWeakEnding(c.text.split(" ").last()))
         }
         assertEquals(text.split(" "), cues.flatMap { it.text.split(" ") })
-    }
-
-    @Test
-    fun groupSizes() {
-        assertEquals(listOf(1), SubtitleChunker.groupSizes(1))
-        assertEquals(listOf(3), SubtitleChunker.groupSizes(3))
-        assertEquals(listOf(2, 2), SubtitleChunker.groupSizes(4))
-        assertEquals(listOf(3, 2), SubtitleChunker.groupSizes(5))
-        assertEquals(listOf(3, 3), SubtitleChunker.groupSizes(6))
-        assertEquals(listOf(3, 3, 3, 2, 2), SubtitleChunker.groupSizes(13))
     }
 
     @Test
@@ -81,7 +84,7 @@ class TimelineTest {
         val expected = narrations.flatMap { SubtitleChunker.words(it) }.map { SubtitleChunker.displayText(it) }
         assertEquals(expected.map { it.trimEnd(',', '.', ';', ':') }, shown.map { it.trimEnd(',', '.', ';', ':') })
         // ogni gruppo ha al massimo 3 parole e i tempi sono in ordine, senza sovrapposizioni
-        assertTrue(timeline.cues.all { it.text.split(" ").size <= 3 })
+        assertTrue(timeline.cues.all { it.text.split(" ").size <= 4 })
         timeline.cues.zipWithNext().forEach { (a, b) -> assertTrue(a.endMs <= b.startMs) }
         timeline.cues.forEach { assertTrue(it.endMs > it.startMs) }
     }
@@ -91,8 +94,8 @@ class TimelineTest {
         val timeline = TimelineBuilder.build(
             listOf(TimelineBuilder.SceneAudio("Follow us for more curiosities!", speechMs = 2000, slotMs = 2500, voiceEndMs = 1900))
         )
-        assertEquals("FOLLOW US FOR", timeline.cues.first().text)
-        assertEquals("MORE CURIOSITIES!", timeline.cues.last().text)
+        assertEquals("FOLLOW US", timeline.cues.first().text)
+        assertEquals("FOR MORE CURIOSITIES!", timeline.cues.last().text)
         assertEquals(2500L, timeline.cues.last().endMs)
         assertEquals(timeline.totalMs, timeline.cues.last().endMs)
     }

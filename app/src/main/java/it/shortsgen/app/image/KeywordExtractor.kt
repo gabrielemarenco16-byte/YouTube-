@@ -67,8 +67,15 @@ object KeywordExtractor {
         topic: String = "",
         subject: String = "",
         hook: Boolean = false,
+        subjectQueries: List<String> = emptyList(),
     ): SceneQueries {
         val subj = clean(subject).ifEmpty { keywords(topic, 1) }
+        // Scena di apertura: SOLO il soggetto, poi le sue riserve (soggetto affine, ambiente),
+        // mai parole generiche prese dal testo del copione.
+        if (hook && subj.isNotEmpty()) {
+            val hookQueries = (listOf(subj) + subjectQueries.map(::clean)).filter { it.isNotEmpty() }.distinct().take(4)
+            return SceneQueries(hookQueries, hookQueries.size)
+        }
         fun addTo(list: MutableList<String>, q: String) {
             val c = withSubject(q, subj)
             if (c.isNotEmpty() && c !in list) list += c

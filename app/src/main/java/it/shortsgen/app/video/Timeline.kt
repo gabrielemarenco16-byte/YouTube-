@@ -20,21 +20,6 @@ data class Timeline(val scenes: List<SceneSlot>, val cues: List<SubtitleCue>) {
 
 object SubtitleChunker {
 
-    /**
-     * Dimensioni dei gruppi per [n] parole: gruppi da [size]; se ne avanzerebbe una sola,
-     * gli ultimi due gruppi diventano da 2 (es. 7 parole = 3+2+2), così non resta una parola isolata.
-     */
-    fun groupSizes(n: Int, size: Int = 3): List<Int> {
-        if (n <= 0) return emptyList()
-        if (n <= size) return listOf(n)
-        val full = n / size
-        return when (n % size) {
-            0 -> List(full) { size }
-            1 -> if (size == 3) List(full - 1) { size } + listOf(2, 2) else List(full) { size } + 1
-            else -> List(full) { size } + (n % size)
-        }
-    }
-
     /** true se dopo questa parola finisce una frase o c'è una virgola/pausa. */
     fun endsPhrase(word: String): Boolean {
         val w = word.trimEnd('"', '\'', ')', '”', '’')
@@ -71,17 +56,61 @@ object SubtitleChunker {
     }
 
     /**
+     * Parole su cui un sottotitolo non deve mai finire: articoli, preposizioni, congiunzioni
+     * e verbi ausiliari brevi. Vengono spostate all'inizio del gruppo successivo.
+     */
+    val WEAK_ENDINGS = setOf(
+        "a", "an", "the", "of", "than", "to", "and", "or", "is", "are", "was", "were", "be",
+        "in", "on", "at", "for", "with", "by", "from", "as", "but", "nor", "so", "into", "onto", "about",
+        "its", "their", "our", "your", "his", "her", "my", "this", "that", "these", "those", "has", "have", "can",
+    )
+
+    /** true se la parola (senza punteggiatura) non può chiudere un gruppo. */
+    fun isWeakEnding(word: String): Boolean {
+        // con la punteggiatura (es. "to.") la frase finisce lì: va bene chiudere
+        if (word.isNotEmpty() && !word.last().isLetterOrDigit()) return false
+        return word.lowercase() in WEAK_ENDINGS
+    }
+
+    /**
+     * Divide una frase in gruppi da 3-4 parole (più corti solo a fine frase), senza mai chiudere
+     * un gruppo su un articolo/preposizione/congiunzione e senza lasciare una parola da sola.
+     */
+    fun <T> splitPhrase(phrase: List<T>, text: (T) -> String, minWords: Int = 3, maxWords: Int = 4): List<List<T>> {
+        val groups = ArrayList<List<T>>()
+        var i = 0
+        val n = phrase.size
+        while (i < n) {
+            val remaining = n - i
+            if (remaining <= maxWords) {
+                groups += phrase.subList(i, n)
+                break
+            }
+            val parts = (remaining + maxWords - 1) / maxWords
+            val base = (remaining + parts - 1) / parts
+            // ordine di preferenza: dimensione bilanciata, poi spostare la parola debole avanti
+            // restando ≥ minWords, poi allungare, infine accorciare fino a 2
+            val options = listOf(base, base - 1, base + 1, base - 2, base + 2).distinct()
+                .filter { it in 2..maxWords && remaining - it >= 2 }
+            val size = options.firstOrNull { it >= minWords && !isWeakEnding(text(phrase[i + it - 1])) }
+                ?: options.firstOrNull { !isWeakEnding(text(phrase[i + it - 1])) }
+                ?: options.firstOrNull()
+                ?: base
+            groups += phrase.subList(i, i + size)
+            i += size
+        }
+        return groups
+    }
+
+    /**
      * Raggruppa TUTTE le parole, in ordine: prima per frasi (o dopo le virgole), poi ogni frase
-     * in righe da massimo [maxWords] parole, mai una parola sola (es. 4 parole = 2+2).
+     * in gruppi da 3-4 parole, mai una parola sola e mai un gruppo che finisce su "the", "of", "and"…
      * Ogni sottotitolo resta visibile fino all'inizio del successivo; l'ultimo fino a [endMs].
      */
-    fun chunk(words: List<WordTiming>, maxWords: Int = 3, endMs: Long? = null): List<SubtitleCue> {
+    fun chunk(words: List<WordTiming>, maxWords: Int = 4, endMs: Long? = null): List<SubtitleCue> {
         val cues = ArrayList<SubtitleCue>()
         for (phrase in phrases(words) { it.word }) {
-            var index = 0
-            for (size in groupSizes(phrase.size, maxWords)) {
-                val group = phrase.subList(index, index + size)
-                index += size
+            for (group in splitPhrase(phrase, { it.word }, minWords = minOf(3, maxWords), maxWords = maxWords)) {
                 cues += SubtitleCue(group.joinToString(" ") { it.word }, group.first().startMs, group.last().endMs)
             }
         }
@@ -143,7 +172,7 @@ object TimelineBuilder {
         val voiceEndMs: Long = speechMs,
     )
 
-    fun build(scenes: List<SceneAudio>, wordsPerCue: Int = 3): Timeline {
+    fun build(scenes: List<SceneAudio>, wordsPerCue: Int = 4): Timeline {
         val slots = ArrayList<SceneSlot>()
         val cues = ArrayList<SubtitleCue>()
         var cursor = 0L

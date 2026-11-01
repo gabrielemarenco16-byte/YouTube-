@@ -69,15 +69,15 @@ object PexelsApi {
 
     /** Primo video non ancora usato, lungo abbastanza e con un file adatto. */
     /** Primo video non ancora usato, lungo abbastanza, senza persone (se vietate) e con un file adatto. */
-    fun chooseVideo(videos: List<Video>, minDurationMs: Long, usedIds: Set<String>, allowPeople: Boolean = true): Pair<Video, VideoFile>? =
-        chooseVideos(videos, minDurationMs, usedIds, allowPeople, 1).firstOrNull()
+    fun chooseVideo(videos: List<Video>, minDurationMs: Long, usedIds: Set<String>, allowPeople: Boolean = true, subject: String = ""): Pair<Video, VideoFile>? =
+        chooseVideos(videos, minDurationMs, usedIds, allowPeople, 1, subject).firstOrNull()
 
     /** Fino a [max] video adatti, nell'ordine dei risultati. */
-    fun chooseVideos(videos: List<Video>, minDurationMs: Long, usedIds: Set<String>, allowPeople: Boolean, max: Int): List<Pair<Video, VideoFile>> =
+    fun chooseVideos(videos: List<Video>, minDurationMs: Long, usedIds: Set<String>, allowPeople: Boolean, max: Int, subject: String = ""): List<Pair<Video, VideoFile>> =
         videos.asSequence()
             .filter { videoId(it.id) !in usedIds }
             .filter { it.durationSec * 1000L >= minDurationMs }
-            .filter { PeopleFilter.allowed(it.description, allowPeople) }
+            .filter { ClipFilter.allowed(it.description, allowPeople, subject) }
             .mapNotNull { v -> chooseFile(v.files)?.let { v to it } }
             .take(max)
             .toList()

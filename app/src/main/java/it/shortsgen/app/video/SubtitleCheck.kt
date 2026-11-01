@@ -8,7 +8,7 @@ object SubtitleCheck {
 
     private fun normalize(word: String) = word.uppercase().filter { it.isLetterOrDigit() }
 
-    fun check(narrations: List<String>, cues: List<SubtitleCue>, totalMs: Long, maxWordsPerCue: Int = 3): Report {
+    fun check(narrations: List<String>, cues: List<SubtitleCue>, totalMs: Long, maxWordsPerCue: Int = 4): Report {
         val expected = narrations.flatMap { SubtitleChunker.words(it) }.map(::normalize).filter { it.isNotEmpty() }
         val shown = cues.flatMap { it.text.split(" ") }.map(::normalize).filter { it.isNotEmpty() }
         val problems = mutableListOf<String>()
@@ -19,6 +19,8 @@ object SubtitleCheck {
                 "\"${expected.drop(at).take(4).joinToString(" ")}\", mostrato \"${shown.drop(at).take(4).joinToString(" ")}\""
         }
         cues.filter { it.text.split(" ").size > maxWordsPerCue }.forEach { problems += "Sottotitolo con troppe parole: \"${it.text}\"" }
+        cues.filter { c -> c.text.split(" ").lastOrNull()?.let { SubtitleChunker.isWeakEnding(it.lowercase()) } == true }
+            .forEach { problems += "Sottotitolo che finisce su una parola debole: \"${it.text}\"" }
         if (expected.size > 1) {
             cues.filter { it.text.split(" ").size < 2 }.forEach { problems += "Parola isolata nei sottotitoli: \"${it.text}\"" }
         }

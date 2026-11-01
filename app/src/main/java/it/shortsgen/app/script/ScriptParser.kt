@@ -54,6 +54,8 @@ object ScriptParser {
         val themeQueries = cleanQueries(stringList(obj["theme_queries"] ?: obj["themeQueries"]), max = 5)
         val subject = cleanQueries(listOfNotNull(obj.string("subject") ?: obj.string("main_subject"))).firstOrNull()
             ?.split(" ")?.take(2)?.joinToString(" ").orEmpty()
+        val subjectQueries = cleanQueries(stringList(obj["subject_queries"] ?: obj["subjectQueries"]))
+            .filter { it != subject }
 
         return VideoScript(
             topic = topic.take(120),
@@ -64,6 +66,7 @@ object ScriptParser {
             theme = theme,
             themeQueries = themeQueries,
             subject = subject,
+            subjectQueries = subjectQueries,
         )
     }
 

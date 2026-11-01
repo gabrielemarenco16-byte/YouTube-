@@ -63,26 +63,23 @@ class KeywordExtractorTest {
     }
 
     @Test
-    fun hookPutsTheMostSpecificQueryFirst() {
-        val q = KeywordExtractor.sceneQueries(
-            llmQueries = listOf("jellyfish", "jellyfish pulsing glowing tentacles", "jellyfish swimming"),
-            theme = "", subject = "jellyfish", hook = true,
-        )
-        assertEquals("jellyfish pulsing glowing tentacles", q.all.first())
-    }
-
-    @Test
     fun pluralSubjectIsNotDuplicated() {
         assertEquals("jellyfishes swimming", KeywordExtractor.withSubject("jellyfishes swimming", "jellyfish"))
         assertEquals("honey bee flower", KeywordExtractor.withSubject("flower", "honey bee"))
     }
 
+
     @Test
-    fun hookPrefersQueriesAboutTheSubject() {
+    fun hookUsesOnlyTheSubjectThenItsFallbacks() {
         val q = KeywordExtractor.sceneQueries(
-            llmQueries = listOf("octopus underwater", "octopus swimming", "coral reef"),
-            theme = "", subject = "octopus", hook = true,
+            llmQueries = listOf("glowing colony", "long chain of tentacles", "dark water"),
+            theme = "ocean",
+            themeQueries = listOf("sea", "underwater"),
+            narration = "This creature is longer than a blue whale",
+            subject = "siphonophore",
+            subjectQueries = listOf("jellyfish", "deep sea"),
+            hook = true,
         )
-        assertEquals(listOf("octopus underwater", "octopus swimming", "octopus coral reef", "octopus"), q.all)
+        assertEquals(listOf("siphonophore", "jellyfish", "deep sea"), q.all)
     }
 }

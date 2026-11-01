@@ -229,6 +229,7 @@ class GenerationPipeline(
                 topic = script.topic,
                 subject = script.subject,
                 hook = hook,
+                subjectQueries = script.subjectQueries,
             )
             MediaRequest(
                 sceneIndex = i,
@@ -238,6 +239,8 @@ class GenerationPipeline(
                 sceneQueryCount = q.sceneCount,
                 keyword = script.subject.ifBlank { q.all.firstOrNull() ?: KeywordExtractor.keywords(scene.narration, 2) },
                 allowPeople = allowPeople,
+                subject = script.subject,
+                hook = hook && script.subject.isNotBlank(),
                 // apertura: si scaricano 3 clip e si tiene la più movimentata
                 candidates = if (hook) 3 else 1,
             )

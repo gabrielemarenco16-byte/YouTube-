@@ -50,6 +50,10 @@ data class MediaRequest(
     val keyword: String = queries.firstOrNull().orEmpty(),
     /** false = scartare clip/foto con persone (il copione non parla di persone). */
     val allowPeople: Boolean = true,
+    /** Soggetto principale del video (le sue parole non fanno scartare un file come "grafico"). */
+    val subject: String = "",
+    /** Scena di apertura: le ricerche sono il soggetto e le sue riserve. */
+    val hook: Boolean = false,
     /** Quante clip candidate scaricare (per l'hook se ne confrontano alcune e si tiene la più movimentata). */
     val candidates: Int = 1,
 )

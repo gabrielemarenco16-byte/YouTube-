@@ -36,7 +36,7 @@ class PexelsProvider(
         val n = request.sceneIndex + 1
         // 1) clip video per tutte le ricerche
         for (query in request.queries) {
-            val chosen = PexelsApi.chooseVideos(searchVideos(query), request.minDurationMs, usedIds, request.allowPeople, request.candidates.coerceAtLeast(1))
+            val chosen = PexelsApi.chooseVideos(searchVideos(query), request.minDurationMs, usedIds, request.allowPeople, request.candidates.coerceAtLeast(1), request.subject)
             if (chosen.isEmpty()) continue
             return chosen.mapIndexed { k, (video, file) ->
                 val target = File(dir, if (chosen.size == 1) "scene_$n.mp4" else "scene_${n}_c${k + 1}.mp4")
@@ -52,7 +52,7 @@ class PexelsProvider(
         // 2) foto verticali
         for (query in request.queries) {
             val photo = searchPhotos(query).firstOrNull {
-                PexelsApi.photoId(it.id) !in usedIds && PeopleFilter.allowed(it.description, request.allowPeople)
+                PexelsApi.photoId(it.id) !in usedIds && ClipFilter.allowed(it.description, request.allowPeople, request.subject)
             } ?: continue
             val downloaded = File(dir, "scene_$n.download")
             val target = File(dir, "scene_$n.jpg")

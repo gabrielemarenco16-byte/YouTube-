@@ -26,4 +26,6 @@ data class VideoScript(
     @SerialName("theme_queries") val themeQueries: List<String> = emptyList(),
     /** Soggetto principale e filmabile del video (es. "jellyfish"): aggiunto a ogni ricerca di clip. */
     val subject: String = "",
+    /** Ricerche di riserva per la scena di apertura: soggetto affine più comune, poi il suo ambiente (es. "jellyfish", "deep sea"). */
+    @SerialName("subject_queries") val subjectQueries: List<String> = emptyList(),
 )

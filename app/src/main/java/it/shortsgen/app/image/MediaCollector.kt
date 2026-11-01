@@ -224,7 +224,12 @@ class MediaCollector(
             if (m.placeholder) return BRANCH_CARD
             if (m.query == "(immagine AI)") return "immagine AI"
             val index = request.queries.indexOf(m.query)
-            val origin = if (index in 0 until request.sceneQueryCount) "query della scena" else "query del tema"
+            val origin = when {
+                request.hook && index == 0 -> "soggetto (apertura)"
+                request.hook -> "riserva del soggetto (apertura)"
+                index in 0 until request.sceneQueryCount -> "query della scena"
+                else -> "query del tema"
+            }
             return (if (m.kind == MediaKind.VIDEO) "clip" else "foto") + " – " + origin
         }
 

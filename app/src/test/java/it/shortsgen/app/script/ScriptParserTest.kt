@@ -69,12 +69,14 @@ class ScriptParserTest {
 
     @Test
     fun parsesSearchQueriesAndTheme() {
-        val json = """{"title":"T","theme":"Chemistry!","theme_queries":["Test tubes","fire","flask","science","smoke","bubbles"],"scenes":[""" +
+        val json = """{"title":"T","subject":"Siphonophore","subject_queries":["Jellyfish","deep sea","siphonophore"],"theme":"Chemistry!","theme_queries":["Test tubes","fire","flask","science","smoke","bubbles"],"scenes":[""" +
             (1..7).joinToString(",") {
                 """{"narration":"n $it.","image_prompt":"p","search_queries":["Lab Test Tubes","science","mystery fact","bubbling liquid","beaker"]}"""
             } + "]}"
         val script = ScriptParser.parse(json)
         assertEquals("chemistry", script.theme)
+        assertEquals("siphonophore", script.subject)
+        assertEquals(listOf("jellyfish", "deep sea"), script.subjectQueries)
         assertEquals(listOf("test tubes", "fire", "flask", "smoke", "bubbles"), script.themeQueries)
         // le query solo astratte ("science", "mystery fact") vengono scartate; massimo 3
         assertEquals(listOf("lab test tubes", "bubbling liquid", "beaker"), script.scenes[0].searchQueries)
