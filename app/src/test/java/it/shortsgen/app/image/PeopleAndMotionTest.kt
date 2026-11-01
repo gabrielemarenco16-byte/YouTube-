@@ -73,4 +73,25 @@ class PeopleAndMotionTest {
         ]}"""
         assertEquals(8L, PixabayApi.chooseVideo(PixabayApi.parseVideos(json), 5_000, emptySet(), allowPeople = false)!!.first.id)
     }
+
+    @Test
+    fun relevanceRequiresATagInCommonAndRejectsLandTagsForMarineSubjects() {
+        val r = RelevanceFilter.build("jellyfish", listOf("deep sea"), listOf("medusa", "cnidarian"), "marine")
+        assertTrue(r.allowed("jellyfish, aquarium, blue"))
+        assertTrue(r.allowed("ocean, underwater, nature"))
+        assertFalse(r.allowed("sunset, sky, clouds")) // nessun termine in comune
+        assertFalse(r.allowed("moss, garden, water")) // tag terrestri per un soggetto marino
+        assertTrue(r.matches("Jellyfishes swimming in the sea").containsAll(listOf("jellyfish", "sea")))
+    }
+
+    @Test
+    fun pixabayDiscardsIrrelevantClips() {
+        val json = """{"hits":[
+            {"id":1,"duration":20,"tags":"moss, forest, macro","videos":{"large":{"url":"https://c/1.mp4","width":1080,"height":1920}}},
+            {"id":2,"duration":20,"tags":"city, night, traffic","videos":{"large":{"url":"https://c/2.mp4","width":1080,"height":1920}}},
+            {"id":3,"duration":20,"tags":"ocean, underwater, fish","videos":{"large":{"url":"https://c/3.mp4","width":1080,"height":1920}}}
+        ]}"""
+        val r = RelevanceFilter.build("jellyfish", emptyList(), emptyList(), "marine")
+        assertEquals(3L, PixabayApi.chooseVideo(PixabayApi.parseVideos(json), 5_000, emptySet(), false, "jellyfish", r)!!.first.id)
+    }
 }

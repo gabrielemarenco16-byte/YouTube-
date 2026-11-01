@@ -272,6 +272,8 @@ class EndToEndTest {
             themeQueries = listOf("ocean waves", "underwater", "sea", "beach"),
             subject = "octopus",
             subjectQueries = listOf("squid", "coral reef"),
+            subjectTerms = listOf("octopus", "cephalopod", "tentacles", "sea", "ocean", "underwater", "marine"),
+            habitat = "marine",
         )
     }
 }

@@ -6,6 +6,7 @@ import android.util.Log
 import it.shortsgen.app.core.GenerationException
 import it.shortsgen.app.core.Http
 import it.shortsgen.app.core.retry
+import it.shortsgen.app.image.ClipHistory
 import it.shortsgen.app.image.CloudflareProvider
 import it.shortsgen.app.image.ImageProvider
 import it.shortsgen.app.image.KeywordExtractor
@@ -16,6 +17,7 @@ import it.shortsgen.app.image.MotionScorer
 import it.shortsgen.app.image.PeopleFilter
 import it.shortsgen.app.image.PexelsProvider
 import it.shortsgen.app.image.PixabayProvider
+import it.shortsgen.app.image.RelevanceFilter
 import it.shortsgen.app.image.SceneMedia
 import it.shortsgen.app.image.ImageTools
 import it.shortsgen.app.script.GeminiTextProvider
@@ -75,6 +77,7 @@ class GenerationPipeline(
         report(Phase.THUMBNAIL, 0f, "Disegno la copertina…")
         withContext(Dispatchers.Default) { ThumbnailGenerator.create(media.firstOrNull(), script.title, thumbnail) }
         report(Phase.THUMBNAIL, 1f, "Fatto!")
+        clipHistory.add(media.filter { !it.placeholder }.map { it.sourceId })
         return GenerationResult(
             jobDir = jobDir.absolutePath,
             title = script.title,
@@ -212,7 +215,12 @@ class GenerationPipeline(
     private fun writeManifest(jobDir: File, manifest: MediaManifest) =
         File(jobDir, "media.json").writeText(Http.json.encodeToString(MediaManifest.serializer(), manifest))
 
+    /** Memoria delle clip usate nei video precedenti (files/used_clips.json). */
+    private val clipHistory = ClipHistory(File(context.filesDir, ClipHistory.FILE_NAME))
+
     private fun buildRequests(script: VideoScript, timeline: Timeline): List<MediaRequest> {
+        val relevance = RelevanceFilter.build(script.subject, script.subjectQueries, script.subjectTerms, script.habitat)
+        val history = clipHistory.ids()
         // Persone ammesse solo se il copione ne parla
         val allowPeople = PeopleFilter.scriptMentionsPeople(
             (listOf(script.topic, script.title) + script.scenes.map { it.narration }).joinToString(" ")
@@ -240,6 +248,8 @@ class GenerationPipeline(
                 keyword = script.subject.ifBlank { q.all.firstOrNull() ?: KeywordExtractor.keywords(scene.narration, 2) },
                 allowPeople = allowPeople,
                 subject = script.subject,
+                relevance = relevance,
+                previouslyUsed = history,
                 hook = hook && script.subject.isNotBlank(),
                 // apertura: si scaricano 3 clip e si tiene la più movimentata
                 candidates = if (hook) 3 else 1,
@@ -328,6 +338,7 @@ class GenerationPipeline(
             tmp.delete()
         }
         writeManifest(jobDir, MediaManifest(media, manifest.rejected + current.sourceId))
+        clipHistory.add(listOf(newMedia.sourceId))
         if (sceneIndex == 0) {
             report(Phase.THUMBNAIL, 0f, "Aggiorno la copertina…")
             withContext(Dispatchers.Default) { ThumbnailGenerator.create(newMedia, script.title, File(previous.thumbnailPath)) }

@@ -34,45 +34,62 @@ class PexelsProvider(
             throw MissingKeyException("PEXELS_API_KEY", "Chiave Pexels mancante: inserisci PEXELS_API_KEY nelle Impostazioni.")
         }
         val n = request.sceneIndex + 1
-        // 1) clip video per tutte le ricerche
-        for (query in request.queries) {
-            val chosen = PexelsApi.chooseVideos(searchVideos(query), request.minDurationMs, usedIds, request.allowPeople, request.candidates.coerceAtLeast(1), request.subject)
-            if (chosen.isEmpty()) continue
-            return chosen.mapIndexed { k, (video, file) ->
-                val target = File(dir, if (chosen.size == 1) "scene_$n.mp4" else "scene_${n}_c${k + 1}.mp4")
-                client.downloadTo(file.link, target, NAME)
-                Log.i(TAG, "Scena $n: video Pexels ${video.id} per \"$query\" (${file.width}x${file.height}) – ${video.description}")
-                SceneMedia(
-                    MediaKind.VIDEO, target.absolutePath, NAME, PexelsApi.videoId(video.id),
-                    query = query, detail = "video ${file.width}x${file.height}, ${video.durationSec} s",
-                    durationMs = video.durationSec * 1000L, description = video.description,
-                )
+        val videoCache = HashMap<String, List<PexelsApi.Video>>()
+        val photoCache = HashMap<String, List<PexelsApi.Photo>>()
+        // Ordine: clip mai usate → foto mai usate → clip già usate in altri video → foto già usate.
+        for (pass in listOf(Pass.FRESH_VIDEO, Pass.FRESH_PHOTO, Pass.OLD_VIDEO, Pass.OLD_PHOTO)) {
+            val excluded = if (pass.fresh) usedIds + request.previouslyUsed else usedIds
+            for (query in request.queries) {
+                if (pass.video) {
+                    val results = videoCache.getOrPut(query) { searchVideos(query) }
+                    val chosen = PexelsApi.chooseVideos(
+                        results, request.minDurationMs, excluded, request.allowPeople,
+                        request.candidates.coerceAtLeast(1), request.subject, request.relevance,
+                    )
+                    if (chosen.isEmpty()) continue
+                    return chosen.mapIndexed { k, (video, file) ->
+                        val target = File(dir, if (chosen.size == 1) "scene_$n.mp4" else "scene_${n}_c${k + 1}.mp4")
+                        client.downloadTo(file.link, target, NAME)
+                        Log.i(TAG, "Scena $n: video Pexels ${video.id} per \"$query\" (${file.width}x${file.height}) – ${video.description}")
+                        SceneMedia(
+                            MediaKind.VIDEO, target.absolutePath, NAME, PexelsApi.videoId(video.id),
+                            query = query, detail = "video ${file.width}x${file.height}, ${video.durationSec} s",
+                            durationMs = video.durationSec * 1000L, description = video.description,
+                            previouslyUsed = PexelsApi.videoId(video.id) in request.previouslyUsed,
+                        )
+                    }
+                } else {
+                    val results = photoCache.getOrPut(query) { searchPhotos(query) }
+                    val photo = results.firstOrNull {
+                        PexelsApi.photoId(it.id) !in excluded &&
+                            ClipFilter.allowed(it.description, request.allowPeople, request.subject, request.relevance)
+                    } ?: continue
+                    val downloaded = File(dir, "scene_$n.download")
+                    val target = File(dir, "scene_$n.jpg")
+                    client.downloadTo(photo.url, downloaded, NAME, maxBytes = 30L * 1024 * 1024)
+                    try {
+                        photoProcessor(downloaded, target)
+                    } finally {
+                        downloaded.delete()
+                    }
+                    Log.i(TAG, "Scena $n: foto Pexels ${photo.id} per \"$query\" – ${photo.description}")
+                    return listOf(
+                        SceneMedia(
+                            MediaKind.IMAGE, target.absolutePath, NAME, PexelsApi.photoId(photo.id),
+                            query = query, detail = "foto", description = photo.description,
+                            previouslyUsed = PexelsApi.photoId(photo.id) in request.previouslyUsed,
+                        )
+                    )
+                }
             }
-        }
-        // 2) foto verticali
-        for (query in request.queries) {
-            val photo = searchPhotos(query).firstOrNull {
-                PexelsApi.photoId(it.id) !in usedIds && ClipFilter.allowed(it.description, request.allowPeople, request.subject)
-            } ?: continue
-            val downloaded = File(dir, "scene_$n.download")
-            val target = File(dir, "scene_$n.jpg")
-            client.downloadTo(photo.url, downloaded, NAME, maxBytes = 30L * 1024 * 1024)
-            try {
-                photoProcessor(downloaded, target)
-            } finally {
-                downloaded.delete()
-            }
-            Log.i(TAG, "Scena $n: foto Pexels ${photo.id} per \"$query\" – ${photo.description}")
-            return listOf(
-                SceneMedia(
-                    MediaKind.IMAGE, target.absolutePath, NAME, PexelsApi.photoId(photo.id),
-                    query = query, detail = "foto", description = photo.description,
-                )
-            )
         }
         throw GenerationException(
-            "Pexels: nessun video o foto adatto trovato per la scena $n (ricerche: ${request.queries.joinToString(", ")})."
+            "Pexels: nessun video o foto pertinente trovato per la scena $n (ricerche: ${request.queries.joinToString(", ")})."
         )
+    }
+
+    private enum class Pass(val video: Boolean, val fresh: Boolean) {
+        FRESH_VIDEO(true, true), FRESH_PHOTO(false, true), OLD_VIDEO(true, false), OLD_PHOTO(false, false)
     }
 
     private suspend fun searchVideos(query: String): List<PexelsApi.Video> {

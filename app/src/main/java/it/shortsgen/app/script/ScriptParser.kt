@@ -56,6 +56,8 @@ object ScriptParser {
             ?.split(" ")?.take(2)?.joinToString(" ").orEmpty()
         val subjectQueries = cleanQueries(stringList(obj["subject_queries"] ?: obj["subjectQueries"]))
             .filter { it != subject }
+        val subjectTerms = cleanQueries(stringList(obj["subject_terms"] ?: obj["subjectTerms"] ?: obj["synonyms"]), max = 12)
+        val habitat = obj.string("habitat")?.trim()?.lowercase()?.takeIf { it.matches(Regex("[a-z]+")) }.orEmpty()
 
         return VideoScript(
             topic = topic.take(120),
@@ -67,6 +69,8 @@ object ScriptParser {
             themeQueries = themeQueries,
             subject = subject,
             subjectQueries = subjectQueries,
+            subjectTerms = subjectTerms,
+            habitat = habitat,
         )
     }
 

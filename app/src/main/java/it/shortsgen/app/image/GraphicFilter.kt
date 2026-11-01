@@ -28,6 +28,7 @@ object GraphicFilter {
 
 /** Regole comuni per decidere se un file di Pexels/Pixabay è adatto. */
 object ClipFilter {
-    fun allowed(description: String, allowPeople: Boolean, subject: String = ""): Boolean =
-        PeopleFilter.allowed(description, allowPeople) && !GraphicFilter.isGraphic(description, subject)
+    fun allowed(description: String, allowPeople: Boolean, subject: String = "", relevance: Relevance = Relevance()): Boolean =
+        PeopleFilter.allowed(description, allowPeople) && !GraphicFilter.isGraphic(description, subject) &&
+            relevance.allowed(description)
 }

@@ -65,14 +65,17 @@ object PixabayApi {
     }
 
     /** Prima i video verticali, poi gli orizzontali ritagliabili; mai uno già usato né con persone (se vietate). */
-    fun chooseVideo(videos: List<Video>, minDurationMs: Long, usedIds: Set<String>, allowPeople: Boolean = true, subject: String = ""): Pair<Video, VideoFile>? =
-        chooseVideos(videos, minDurationMs, usedIds, allowPeople, 1, subject).firstOrNull()
+    fun chooseVideo(
+        videos: List<Video>, minDurationMs: Long, usedIds: Set<String>, allowPeople: Boolean = true,
+        subject: String = "", relevance: Relevance = Relevance(),
+    ): Pair<Video, VideoFile>? =
+        chooseVideos(videos, minDurationMs, usedIds, allowPeople, 1, subject, relevance).firstOrNull()
 
     /** Fino a [max] video adatti: prima i verticali, poi gli orizzontali ritagliabili. */
-    fun chooseVideos(videos: List<Video>, minDurationMs: Long, usedIds: Set<String>, allowPeople: Boolean, max: Int, subject: String = ""): List<Pair<Video, VideoFile>> {
+    fun chooseVideos(videos: List<Video>, minDurationMs: Long, usedIds: Set<String>, allowPeople: Boolean, max: Int, subject: String = "", relevance: Relevance = Relevance()): List<Pair<Video, VideoFile>> {
         val candidates = videos
             .filter { videoId(it.id) !in usedIds && it.durationSec * 1000L >= minDurationMs }
-            .filter { ClipFilter.allowed(it.description, allowPeople, subject) }
+            .filter { ClipFilter.allowed(it.description, allowPeople, subject, relevance) }
             .mapNotNull { v -> chooseFile(v.files)?.let { v to it } }
         val (vertical, horizontal) = candidates.partition { (_, f) -> f.height >= f.width }
         return (vertical + horizontal).take(max)

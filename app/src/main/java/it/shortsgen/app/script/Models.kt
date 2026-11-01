@@ -28,4 +28,8 @@ data class VideoScript(
     val subject: String = "",
     /** Ricerche di riserva per la scena di apertura: soggetto affine più comune, poi il suo ambiente (es. "jellyfish", "deep sea"). */
     @SerialName("subject_queries") val subjectQueries: List<String> = emptyList(),
+    /** Sinonimi e parole d'ambiente del soggetto (es. "medusa", "sea", "ocean", "underwater", "marine"). */
+    @SerialName("subject_terms") val subjectTerms: List<String> = emptyList(),
+    /** Ambiente del soggetto: marine, freshwater, land, air, space, other. */
+    val habitat: String = "",
 )

@@ -195,6 +195,9 @@ class MediaCollector(
                 "file: ${m.file.name}" +
                 (if (m.startMs > 0) " | da ${m.startMs / 1000.0} s" else "") +
                 (if (m.motion >= 0) " | movimento ${"%.1f".format(m.motion)}" else "") +
+                request.relevance.matches(m.description).takeIf { it.isNotEmpty() }
+                    ?.let { " | pertinenza: ${it.joinToString(", ")}" }.orEmpty() +
+                (if (m.previouslyUsed) " | già usata in un video precedente (nessuna alternativa nuova)" else "") +
                 (if (m.description.isNotBlank()) " | descrizione: ${m.description.take(80)}" else "") +
                 (if (reused) " | riutilizzato da tentativo precedente" else "") + " | $tried"
         }

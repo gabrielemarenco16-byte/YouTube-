@@ -61,12 +61,18 @@ class SubtitleOverlay(
         val maxWidth = (width * 0.86f).toInt()
         // Un gruppo su due in giallo, per dare ritmo come negli Short più visti.
         val paint = if (currentIndex % 2 == 0) fill else highlight
-        // Dimensione del carattere sempre uguale: se la riga è troppo lunga va a capo (massimo 2 righe).
-        val strokeLayout = layout(cue.text, stroke, maxWidth)
-        val fillLayout = layout(cue.text, paint, maxWidth)
+        // Dimensione del carattere sempre uguale: se il gruppo non sta su una riga, si va a capo
+        // in un punto bilanciato (mai una parola sola sull'ultima riga); nessuna parola viene tagliata.
+        val strokeExtra = stroke.strokeWidth
+        val lines = LineBalancer.lines(cue.text.split(" "), maxWidth.toFloat()) { paint.measureText(it) + strokeExtra }
+        val text = lines.joinToString("\n") { it.joinToString(" ") }
+        // il layout ha un po' più di spazio: le righe sono già decise, Android non deve rimandarle a capo
+        val layoutWidth = (width * 0.96f).toInt()
+        val strokeLayout = layout(text, stroke, layoutWidth)
+        val fillLayout = layout(text, paint, layoutWidth)
         canvas.save()
         // In basso, sopra la zona coperta dall'interfaccia di YouTube Shorts
-        canvas.translate((width - maxWidth) / 2f, height * BOTTOM_POSITION - fillLayout.height / 2f)
+        canvas.translate((width - layoutWidth) / 2f, height * BOTTOM_POSITION - fillLayout.height / 2f)
         strokeLayout.draw(canvas)
         fillLayout.draw(canvas)
         canvas.restore()
@@ -77,7 +83,6 @@ class SubtitleOverlay(
             .setAlignment(Layout.Alignment.ALIGN_CENTER)
             .setLineSpacing(0f, 0.95f)
             .setIncludePad(false)
-            .setMaxLines(2)
             .build()
 
     private companion object {

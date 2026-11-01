@@ -31,6 +31,8 @@ data class SceneMedia(
     val reusedFromScene: Int = -1,
     /** Punteggio di movimento (solo per le clip confrontate, es. l'hook). */
     val motion: Double = -1.0,
+    /** true se il file era già stato usato in un video precedente (nessuna alternativa nuova). */
+    val previouslyUsed: Boolean = false,
 ) {
     val file: File get() = File(path)
 }
@@ -52,6 +54,10 @@ data class MediaRequest(
     val allowPeople: Boolean = true,
     /** Soggetto principale del video (le sue parole non fanno scartare un file come "grafico"). */
     val subject: String = "",
+    /** Controllo di pertinenza (tag in comune con soggetto/sinonimi/habitat, niente tag fuori ambiente). */
+    val relevance: Relevance = Relevance(),
+    /** ID già usati in video precedenti: si usano solo se non ci sono alternative. */
+    val previouslyUsed: Set<String> = emptySet(),
     /** Scena di apertura: le ricerche sono il soggetto e le sue riserve. */
     val hook: Boolean = false,
     /** Quante clip candidate scaricare (per l'hook se ne confrontano alcune e si tiene la più movimentata). */
