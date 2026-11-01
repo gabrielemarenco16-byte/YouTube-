@@ -60,9 +60,20 @@ object SubtitleChunker {
      * e verbi ausiliari brevi. Vengono spostate all'inizio del gruppo successivo.
      */
     val WEAK_ENDINGS = setOf(
-        "a", "an", "the", "of", "than", "to", "and", "or", "is", "are", "was", "were", "be",
-        "in", "on", "at", "for", "with", "by", "from", "as", "but", "nor", "so", "into", "onto", "about",
-        "its", "their", "our", "your", "his", "her", "my", "this", "that", "these", "those", "has", "have", "can",
+        // articoli e determinanti
+        "a", "an", "the", "this", "that", "these", "those", "its", "their", "our", "your", "his", "her", "my",
+        "some", "any", "every", "each", "no", "more", "most", "less", "very", "so", "such", "too", "not",
+        // preposizioni
+        "of", "to", "in", "on", "at", "for", "with", "by", "from", "as", "into", "onto", "about", "than",
+        "through", "around", "across", "along", "over", "under", "between", "among", "without", "within",
+        "after", "before", "during", "toward", "towards", "behind", "beyond", "above", "below", "near",
+        "inside", "outside", "upon", "against", "via", "per", "like", "off", "until", "since",
+        // congiunzioni e relativi
+        "and", "or", "but", "nor", "if", "because", "while", "although", "though", "when", "where",
+        "which", "who", "whose", "whom",
+        // verbi ausiliari
+        "is", "are", "was", "were", "be", "been", "being", "am", "has", "have", "had", "do", "does", "did",
+        "can", "could", "will", "would", "shall", "should", "may", "might", "must",
     )
 
     /** true se la parola (senza punteggiatura) non può chiudere un gruppo. */
@@ -75,29 +86,37 @@ object SubtitleChunker {
     /**
      * Divide una frase in gruppi da 3-4 parole (più corti solo a fine frase), senza mai chiudere
      * un gruppo su un articolo/preposizione/congiunzione e senza lasciare una parola da sola.
+     * Valuta tutte le divisioni possibili e sceglie quella con meno "penalità":
+     * gruppo che finisce su una parola debole (molto grave), gruppo da 2 parole a metà frase (lieve).
      */
     fun <T> splitPhrase(phrase: List<T>, text: (T) -> String, minWords: Int = 3, maxWords: Int = 4): List<List<T>> {
+        val n = phrase.size
+        if (n <= maxWords) return if (n == 0) emptyList() else listOf(phrase)
+        val inf = Int.MAX_VALUE / 4
+        // best[i] = penalità minima per dividere le parole da i alla fine; next[i] = fine del primo gruppo
+        val best = IntArray(n + 1) { inf }
+        val next = IntArray(n + 1)
+        best[n] = 0
+        for (i in n - 1 downTo 0) {
+            for (size in listOf(3, 4, 2)) {
+                val j = i + size
+                if (size > maxWords || j > n || n - j == 1 || best[j] >= inf) continue
+                val end = j == n
+                var cost = best[j]
+                if (!end && isWeakEnding(text(phrase[j - 1]))) cost += 100
+                if (!end && size < minWords) cost += 3
+                if (cost < best[i]) {
+                    best[i] = cost
+                    next[i] = j
+                }
+            }
+        }
         val groups = ArrayList<List<T>>()
         var i = 0
-        val n = phrase.size
         while (i < n) {
-            val remaining = n - i
-            if (remaining <= maxWords) {
-                groups += phrase.subList(i, n)
-                break
-            }
-            val parts = (remaining + maxWords - 1) / maxWords
-            val base = (remaining + parts - 1) / parts
-            // ordine di preferenza: dimensione bilanciata, poi spostare la parola debole avanti
-            // restando ≥ minWords, poi allungare, infine accorciare fino a 2
-            val options = listOf(base, base - 1, base + 1, base - 2, base + 2).distinct()
-                .filter { it in 2..maxWords && remaining - it >= 2 }
-            val size = options.firstOrNull { it >= minWords && !isWeakEnding(text(phrase[i + it - 1])) }
-                ?: options.firstOrNull { !isWeakEnding(text(phrase[i + it - 1])) }
-                ?: options.firstOrNull()
-                ?: base
-            groups += phrase.subList(i, i + size)
-            i += size
+            val j = if (best[i] < inf) next[i] else n
+            groups += phrase.subList(i, j)
+            i = j
         }
         return groups
     }

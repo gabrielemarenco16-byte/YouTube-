@@ -13,17 +13,17 @@ class TimelineTest {
     @Test
     fun groupsOfThreeOrFourWords() {
         val cues = SubtitleChunker.chunk(timings("one two three four five six seven"))
-        assertEquals(listOf("one two three four", "five six seven"), cues.map { it.text })
+        assertEquals(listOf("one two three", "four five six seven"), cues.map { it.text })
         assertEquals(0L, cues[0].startMs)
         // il primo sottotitolo resta fino all'inizio del secondo
-        assertEquals(400L, cues[0].endMs)
+        assertEquals(300L, cues[0].endMs)
     }
 
     @Test
     fun splitsAtSentencesAndCommasNeverOneWordAlone() {
         val cues = SubtitleChunker.chunk(timings("Honey never spoils, even after thousands of years. Archaeologists found edible honey in Egyptian tombs."))
         assertEquals(
-            listOf("Honey never spoils,", "even after thousands", "of years.", "Archaeologists found edible honey", "in Egyptian tombs."),
+            listOf("Honey never spoils,", "even after thousands", "of years.", "Archaeologists found edible", "honey in Egyptian tombs."),
             cues.map { it.text },
         )
     }
@@ -146,5 +146,31 @@ class TimelineTest {
         assertTrue(durations.sum() + pauses.sum() >= DurationPlanner.MIN_TOTAL_MS)
         val normal = DurationPlanner.pauses(List(7) { 6_000L })
         assertEquals(List(6) { DurationPlanner.BASE_PAUSE_MS } + DurationPlanner.FINAL_PAUSE_MS, normal)
+    }
+
+    @Test
+    fun avoidsShortGroupsWhenPossible() {
+        assertEquals(
+            listOf("The third heart", "pushes that blood", "around the rest", "of its soft body."),
+            SubtitleChunker.chunk(timings("The third heart pushes that blood around the rest of its soft body.")).map { it.text },
+        )
+    }
+
+    @Test
+    fun noGroupEndsOnPrepositionsOrAuxiliaries() {
+        val narrations = listOf(
+            "Two of those hearts pump blood through the gills, where it picks up oxygen.",
+            "The third heart pushes that blood around the rest of its soft body.",
+            "That is why octopuses prefer crawling along the sea floor instead.",
+            "Follow us for more incredible curiosities about our amazing planet!",
+        )
+        narrations.forEach { n ->
+            val cues = SubtitleChunker.chunk(timings(n))
+            assertEquals(n.split(" "), cues.flatMap { it.text.split(" ") })
+            cues.forEach { c ->
+                assertFalse("\"${c.text}\" in \"$n\"", SubtitleChunker.isWeakEnding(c.text.split(" ").last()))
+                assertTrue("\"${c.text}\"", c.text.split(" ").size in 2..4)
+            }
+        }
     }
 }
