@@ -17,6 +17,11 @@ object KeywordExtractor {
         "make", "makes", "made", "get", "gets", "much", "many", "may", "might", "also", "out", "up", "down",
     )
 
+    /** Temi generici sempre disponibili negli archivi, usati solo se le ricerche specifiche falliscono. */
+    private const val MAX_SPECIFIC = 6
+
+    val GENERIC = listOf("nature landscape", "sky clouds", "ocean waves", "city night", "forest", "abstract light")
+
     fun keywords(text: String, max: Int = 3): String =
         text.lowercase()
             .split(Regex("[^a-z]+"))
@@ -37,7 +42,18 @@ object KeywordExtractor {
         add(keywords(imagePrompt, 3))
         add(keywords(narration, 3))
         add(keywords(topic, 2))
-        add(keywords(imagePrompt, 1))
-        return list
+        // ricerche sempre più semplici: le archivi gratuiti cercano tutte le parole insieme
+        // (prima le parole che compaiono più spesso nella scena)
+        (keywords(searchQuery, 3) + " " + keywords(imagePrompt, 3) + " " + keywords(narration, 3) + " " + keywords(topic, 2))
+            .split(" ").filter { it.length > 3 }
+            .groupingBy { it }.eachCount()
+            .entries.sortedByDescending { it.value }
+            .forEach { add(it.key) }
+        // al massimo 6 ricerche specifiche (i servizi gratuiti hanno limiti di richieste)
+        val multi = list.filter { ' ' in it }.take(MAX_SPECIFIC - 2)
+        val single = list.filter { ' ' !in it }
+        val specific = (multi + single).take(MAX_SPECIFIC)
+        // ultima spiaggia prima del segnaposto: immagini generiche ma reali
+        return (specific + GENERIC.take(2)).distinct()
     }
 }

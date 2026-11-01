@@ -23,4 +23,12 @@ class KeywordExtractorTest {
         val q = KeywordExtractor.queries("", "ancient egyptian pyramids at sunset", "", "")
         assertEquals("ancient egyptian pyramids", q.first())
     }
+
+    @Test
+    fun alwaysEndsWithGenericFallbacksAndStaysShort() {
+        val q = KeywordExtractor.queries("glowing jellyfish deep sea", "bioluminescent jellyfish in the dark ocean", "Some jellyfish glow.", "Jellyfish light")
+        assertTrue(q.size <= 8)
+        assertEquals(KeywordExtractor.GENERIC.take(2), q.takeLast(2))
+        assertTrue(q.contains("jellyfish"))
+    }
 }

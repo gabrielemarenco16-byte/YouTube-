@@ -58,9 +58,14 @@ class SubtitleOverlay(
     private fun redraw(cue: SubtitleCue?) {
         bitmap.eraseColor(Color.TRANSPARENT)
         if (cue == null) return
-        val maxWidth = (width * 0.86f).toInt()
+        val maxWidth = (width * 0.9f).toInt()
         // Un gruppo su due in giallo, per dare ritmo come negli Short più visti.
         val paint = if (currentIndex % 2 == 0) fill else highlight
+        // Rimpicciolisce il testo finché sta su una riga (con un minimo leggibile; oltre va a capo).
+        val size = fitTextSize(cue.text, maxWidth)
+        paint.textSize = size
+        stroke.textSize = size
+        stroke.strokeWidth = size * 0.19f
         val strokeLayout = layout(cue.text, stroke, maxWidth)
         val fillLayout = layout(cue.text, paint, maxWidth)
         canvas.save()
@@ -69,6 +74,19 @@ class SubtitleOverlay(
         strokeLayout.draw(canvas)
         fillLayout.draw(canvas)
         canvas.restore()
+    }
+
+    private fun fitTextSize(text: String, maxWidth: Int): Float {
+        val probe = TextPaint(fill)
+        var size = width * 0.085f
+        val min = width * 0.055f
+        probe.textSize = size
+        // margine per il bordo nero
+        while (size > min && probe.measureText(text) + size * 0.4f > maxWidth) {
+            size -= 2f
+            probe.textSize = size
+        }
+        return size
     }
 
     private fun layout(text: String, paint: TextPaint, w: Int): StaticLayout =
