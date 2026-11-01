@@ -15,6 +15,7 @@ adb shell am instrument -w -r \
   -e GEMINI_API_KEY "${GEMINI_API_KEY:-none}" \
   -e GROQ_API_KEY "${GROQ_API_KEY:-none}" \
   -e PEXELS_API_KEY "${PEXELS_API_KEY:-none}" \
+  -e PIXABAY_API_KEY "${PIXABAY_API_KEY:-none}" \
   -e CF_ACCOUNT_ID "${CF_ACCOUNT_ID:-none}" \
   -e CF_API_TOKEN "${CF_API_TOKEN:-none}" \
   -e class it.shortsgen.app.EndToEndTest \

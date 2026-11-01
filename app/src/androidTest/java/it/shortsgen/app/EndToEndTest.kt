@@ -65,9 +65,11 @@ class EndToEndTest {
         val gemini = arg("GEMINI_API_KEY")
         val groq = arg("GROQ_API_KEY")
         val pexels = arg("PEXELS_API_KEY")
+        val pixabay = arg("PIXABAY_API_KEY")
         val cfAccount = arg("CF_ACCOUNT_ID")
         val cfToken = arg("CF_API_TOKEN")
         line("Chiavi presenti: GEMINI=${gemini.isNotEmpty()} GROQ=${groq.isNotEmpty()} PEXELS=${pexels.isNotEmpty()} " +
+            "PIXABAY=${pixabay.isNotEmpty()} " +
             "CF=${cfAccount.isNotEmpty() && cfToken.isNotEmpty()}")
 
         if (gemini.isEmpty() && groq.isEmpty()) {
@@ -76,10 +78,16 @@ class EndToEndTest {
         }
         val settings = AppSettings(
             textProvider = if (gemini.isNotEmpty()) TextProviderType.GEMINI else TextProviderType.GROQ,
-            imageProvider = if (pexels.isNotEmpty() || cfAccount.isEmpty()) ImageProviderType.PEXELS else ImageProviderType.CLOUDFLARE,
+            imageProvider = when {
+                pexels.isNotEmpty() -> ImageProviderType.PEXELS
+                pixabay.isNotEmpty() -> ImageProviderType.PIXABAY
+                cfAccount.isNotEmpty() -> ImageProviderType.CLOUDFLARE
+                else -> ImageProviderType.PEXELS
+            },
             geminiKey = gemini,
             groqKey = groq,
             pexelsKey = pexels,
+            pixabayKey = pixabay,
             cloudflareAccountId = cfAccount,
             cloudflareToken = cfToken,
         )

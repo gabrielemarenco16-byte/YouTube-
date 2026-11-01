@@ -47,6 +47,7 @@ object ErrorMessages {
         "Gemini" to "GEMINI_API_KEY",
         "Groq" to "GROQ_API_KEY",
         "Pexels" to "PEXELS_API_KEY",
+        "Pixabay" to "PIXABAY_API_KEY",
         "Cloudflare" to "CF_ACCOUNT_ID / CF_API_TOKEN",
     )
 

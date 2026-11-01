@@ -2,48 +2,6 @@ package it.shortsgen.app.settings
 
 import android.content.Context
 
-enum class TextProviderType(val label: String) { GEMINI("Gemini"), GROQ("Groq") }
-
-enum class ImageProviderType(val label: String) {
-    PEXELS("Pexels – video e foto reali (consigliato)"),
-    CLOUDFLARE("Cloudflare Workers AI – immagini AI"),
-}
-
-data class AppSettings(
-    val textProvider: TextProviderType = TextProviderType.GEMINI,
-    val imageProvider: ImageProviderType = ImageProviderType.PEXELS,
-    val geminiKey: String = "",
-    val groqKey: String = "",
-    val pexelsKey: String = "",
-    val cloudflareAccountId: String = "",
-    val cloudflareToken: String = "",
-    val geminiTextModel: String = DEFAULT_GEMINI_TEXT_MODEL,
-    val groqModel: String = DEFAULT_GROQ_MODEL,
-    val cloudflareModel: String = DEFAULT_CLOUDFLARE_MODEL,
-    val speechRate: Float = 1.0f,
-) {
-    /** Elenco delle informazioni mancanti per poter generare un video. */
-    fun missing(): List<String> = buildList {
-        when (textProvider) {
-            TextProviderType.GEMINI -> if (geminiKey.isBlank()) add("GEMINI_API_KEY (chiave Gemini per il copione)")
-            TextProviderType.GROQ -> if (groqKey.isBlank()) add("GROQ_API_KEY (chiave Groq per il copione)")
-        }
-        when (imageProvider) {
-            ImageProviderType.PEXELS -> if (pexelsKey.isBlank()) add("PEXELS_API_KEY (chiave Pexels per video e foto)")
-            ImageProviderType.CLOUDFLARE -> {
-                if (cloudflareAccountId.isBlank()) add("CF_ACCOUNT_ID (Account ID Cloudflare)")
-                if (cloudflareToken.isBlank()) add("CF_API_TOKEN (token API Cloudflare)")
-            }
-        }
-    }.distinct()
-
-    companion object {
-        const val DEFAULT_GEMINI_TEXT_MODEL = "gemini-flash-latest"
-        const val DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
-        const val DEFAULT_CLOUDFLARE_MODEL = "@cf/black-forest-labs/flux-1-schnell"
-    }
-}
-
 class SettingsRepository(context: Context) {
     private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
     private val secure = SecureStore(context)
@@ -54,6 +12,7 @@ class SettingsRepository(context: Context) {
         geminiKey = secure.get("gemini_key"),
         groqKey = secure.get("groq_key"),
         pexelsKey = secure.get("pexels_key"),
+        pixabayKey = secure.get("pixabay_key"),
         cloudflareAccountId = secure.get("cf_account"),
         cloudflareToken = secure.get("cf_token"),
         geminiTextModel = prefs.getString("gemini_text_model", null)
@@ -76,6 +35,7 @@ class SettingsRepository(context: Context) {
         secure.put("gemini_key", s.geminiKey)
         secure.put("groq_key", s.groqKey)
         secure.put("pexels_key", s.pexelsKey)
+        secure.put("pixabay_key", s.pixabayKey)
         secure.put("cf_account", s.cloudflareAccountId)
         secure.put("cf_token", s.cloudflareToken)
     }

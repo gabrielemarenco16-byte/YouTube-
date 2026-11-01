@@ -24,8 +24,17 @@ object Http {
         explicitNulls = false
     }
 
+    /** Alcuni servizi (es. Pexels, dietro un filtro anti-bot) rifiutano client non riconosciuti. */
+    const val USER_AGENT =
+        "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36 ShortsGenerator/1.0"
+
     val client: OkHttpClient by lazy {
         OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                val request = chain.request()
+                if (request.header("User-Agent") != null) chain.proceed(request)
+                else chain.proceed(request.newBuilder().header("User-Agent", USER_AGENT).build())
+            }
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(180, TimeUnit.SECONDS)
             .writeTimeout(60, TimeUnit.SECONDS)

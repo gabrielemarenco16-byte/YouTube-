@@ -1,7 +1,7 @@
 name: E2E video test
 
 # Genera un video vero su emulatore Android, estrae fotogrammi e un report.
-# Chiavi: secrets del repository GEMINI_API_KEY (o GROQ_API_KEY), PEXELS_API_KEY,
+# Chiavi: secrets del repository GEMINI_API_KEY (o GROQ_API_KEY), PEXELS_API_KEY o PIXABAY_API_KEY,
 # opzionali CF_ACCOUNT_ID e CF_API_TOKEN. Senza chiavi usa un copione fisso.
 on:
   workflow_dispatch:
@@ -46,6 +46,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
         with:

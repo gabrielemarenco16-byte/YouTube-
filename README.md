@@ -42,6 +42,7 @@ dell'app, nei messaggi di errore e nei secrets di GitHub:
 | `GEMINI_API_KEY` | Google AI Studio | copione (predefinito) |
 | `GROQ_API_KEY` | Groq | copione (alternativa) |
 | `PEXELS_API_KEY` | Pexels | clip video e foto (predefinito) |
+| `PIXABAY_API_KEY` | Pixabay | clip video e foto (alternativa a Pexels) |
 | `CF_ACCOUNT_ID` + `CF_API_TOKEN` | Cloudflare Workers AI | immagini AI (opzionale, anche come riserva) |
 
 **Le chiavi non sono mai scritte nel codice.** Nell'app si inseriscono nelle Impostazioni (salvate
@@ -67,6 +68,11 @@ Gratis, senza watermark, video reali in verticale.
    (scopo: progetto personale) e copia la chiave.
 
 Limiti gratuiti: 200 richieste all'ora, 20.000 al mese (un video ne usa circa 10-20).
+
+### Pixabay – `PIXABAY_API_KEY` (alternativa a Pexels)
+Gratis, senza watermark. Registrati su <https://pixabay.com/accounts/register/>, poi apri
+<https://pixabay.com/api/docs/>: la tua chiave è scritta nella sezione *Parameters* (formato `12345678-abc…`).
+Se per errore la incolli nel campo Pexels, l'app la riconosce e la usa per Pixabay.
 
 ### Cloudflare Workers AI – `CF_ACCOUNT_ID` e `CF_API_TOKEN` (opzionale)
 Il piano gratuito include una quota giornaliera che basta per diversi video al giorno.
@@ -115,7 +121,7 @@ I risultati (fotogrammi, `report.txt`, video) vengono pubblicati nella pre-relea
 
 Per usare le tue chiavi aggiungile come secrets del repository: su GitHub apri **Settings → Secrets and
 variables → Actions → New repository secret** e crea `GEMINI_API_KEY` (o `GROQ_API_KEY`) e
-`PEXELS_API_KEY` (opzionali `CF_ACCOUNT_ID` e `CF_API_TOKEN`). Senza chiavi il test usa un copione di
+`PEXELS_API_KEY` o `PIXABAY_API_KEY` (opzionali `CF_ACCOUNT_ID` e `CF_API_TOKEN`). Senza chiavi il test usa un copione di
 prova e immagini segnaposto, e il controllo "nessun segnaposto" risulta fallito.
 
 ---

@@ -98,9 +98,9 @@ fun SettingsScreen(onBack: () -> Unit) {
                     RadioRow(type.label, selected = s.imageProvider == type) { s = s.copy(imageProvider = type) }
                 }
                 when (s.imageProvider) {
-                    ImageProviderType.PEXELS -> Text(
-                        "Clip video verticali e foto gratuite. Se Pexels non trova nulla, e Cloudflare è configurato, " +
-                            "l'app prova Cloudflare.",
+                    ImageProviderType.PEXELS, ImageProviderType.PIXABAY -> Text(
+                        "Clip video e foto gratuite, senza watermark. Se il servizio scelto non trova nulla, " +
+                            "l'app prova gli altri servizi per cui hai inserito la chiave.",
                         style = MaterialTheme.typography.bodySmall,
                     )
                     ImageProviderType.CLOUDFLARE -> ModelField("Modello Cloudflare", s.cloudflareModel) {
@@ -113,6 +113,14 @@ fun SettingsScreen(onBack: () -> Unit) {
                 SecretField("GEMINI_API_KEY – chiave Gemini", s.geminiKey) { s = s.copy(geminiKey = it) }
                 SecretField("GROQ_API_KEY – chiave Groq", s.groqKey) { s = s.copy(groqKey = it) }
                 SecretField("PEXELS_API_KEY – chiave Pexels", s.pexelsKey) { s = s.copy(pexelsKey = it) }
+                if (s.pixabayKeyInPexelsField) {
+                    Text(
+                        "Questa sembra una chiave Pixabay (formato 12345678-abc…): verrà usata per Pixabay.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.tertiary,
+                    )
+                }
+                SecretField("PIXABAY_API_KEY – chiave Pixabay", s.pixabayKey) { s = s.copy(pixabayKey = it) }
                 SecretField("CF_ACCOUNT_ID – Account ID Cloudflare", s.cloudflareAccountId, secret = false) {
                     s = s.copy(cloudflareAccountId = it)
                 }

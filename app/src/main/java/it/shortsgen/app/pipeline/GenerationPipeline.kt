@@ -13,6 +13,7 @@ import it.shortsgen.app.image.MediaCollector
 import it.shortsgen.app.image.MediaKind
 import it.shortsgen.app.image.MediaRequest
 import it.shortsgen.app.image.PexelsProvider
+import it.shortsgen.app.image.PixabayProvider
 import it.shortsgen.app.image.SceneMedia
 import it.shortsgen.app.image.ImageTools
 import it.shortsgen.app.script.GeminiTextProvider
@@ -183,15 +184,13 @@ class GenerationPipeline(
 
     // ---------- 3) Immagini e video ----------
 
-    /** Provider scelto nelle Impostazioni, poi l'altro (se configurato) come riserva. */
-    private fun imageProviders(): List<ImageProvider> {
-        val pexels = PexelsProvider(settings.pexelsKey)
-        val cloudflare = CloudflareProvider(settings.cloudflareAccountId, settings.cloudflareToken, settings.cloudflareModel)
-        val hasPexels = settings.pexelsKey.isNotBlank()
-        val hasCloudflare = settings.cloudflareAccountId.isNotBlank() && settings.cloudflareToken.isNotBlank()
-        return when (settings.imageProvider) {
-            ImageProviderType.PEXELS -> listOfNotNull(pexels, cloudflare.takeIf { hasCloudflare })
-            ImageProviderType.CLOUDFLARE -> listOfNotNull(cloudflare, pexels.takeIf { hasPexels })
+    /** Servizi immagini in ordine: quello scelto nelle Impostazioni, poi gli altri configurati come riserva. */
+    private fun imageProviders(): List<ImageProvider> = settings.imageSources().map { type ->
+        when (type) {
+            ImageProviderType.PEXELS -> PexelsProvider(settings.effectivePexelsKey)
+            ImageProviderType.PIXABAY -> PixabayProvider(settings.effectivePixabayKey)
+            ImageProviderType.CLOUDFLARE ->
+                CloudflareProvider(settings.cloudflareAccountId, settings.cloudflareToken, settings.cloudflareModel)
         }
     }
 
