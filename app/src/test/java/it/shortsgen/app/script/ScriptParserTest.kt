@@ -66,4 +66,16 @@ class ScriptParserTest {
         assertEquals(100, ScriptParser.parse(json).title.length)
         assertFalse(ScriptParser.parse(json).title.length > 100)
     }
+
+    @Test
+    fun parsesSearchQueriesAndTheme() {
+        val json = """{"title":"T","theme":"Chemistry!","scenes":[""" +
+            (1..7).joinToString(",") {
+                """{"narration":"n $it.","image_prompt":"p","search_queries":["Lab Test Tubes","science","mystery fact","bubbling liquid","beaker"]}"""
+            } + "]}"
+        val script = ScriptParser.parse(json)
+        assertEquals("chemistry", script.theme)
+        // le query solo astratte ("science", "mystery fact") vengono scartate; massimo 3
+        assertEquals(listOf("lab test tubes", "bubbling liquid", "beaker"), script.scenes[0].searchQueries)
+    }
 }

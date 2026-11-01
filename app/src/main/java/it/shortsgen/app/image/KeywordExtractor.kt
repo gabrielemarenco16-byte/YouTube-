@@ -18,8 +18,6 @@ object KeywordExtractor {
     )
 
     /** Temi generici sempre disponibili negli archivi, usati solo se le ricerche specifiche falliscono. */
-    private const val MAX_SPECIFIC = 6
-
     val GENERIC = listOf("nature landscape", "sky clouds", "ocean waves", "city night", "forest", "abstract light")
 
     fun keywords(text: String, max: Int = 3): String =
@@ -30,30 +28,39 @@ object KeywordExtractor {
             .take(max)
             .joinToString(" ")
 
-    /** Ricerche per una scena, dalla più precisa alla più generica, senza duplicati. */
-    fun queries(searchQuery: String, imagePrompt: String, narration: String, topic: String): List<String> {
+    /** Pulisce una ricerca: minuscole, solo lettere/numeri/spazi. */
+    private fun clean(q: String) =
+        q.trim().lowercase().replace(Regex("[^a-z0-9 ]"), " ").replace(Regex("\\s+"), " ").trim()
+
+    /**
+     * Ricerche per una scena, nell'ordine in cui vanno provate:
+     * 1) le query visive generate dall'LLM (massimo 3);
+     *    se mancano, parole chiave ricavate dalla scena;
+     * 2) la query generica del tema del video (es. "chemistry", "fire", "space").
+     */
+    fun queries(
+        llmQueries: List<String>,
+        theme: String,
+        searchQuery: String = "",
+        imagePrompt: String = "",
+        narration: String = "",
+        topic: String = "",
+    ): List<String> {
         val list = mutableListOf<String>()
         fun add(q: String) {
-            val clean = q.trim().lowercase().replace(Regex("[^a-z0-9 ]"), " ").replace(Regex("\\s+"), " ").trim()
-            if (clean.isNotEmpty() && clean !in list) list += clean
+            val c = clean(q)
+            if (c.isNotEmpty() && c !in list) list += c
         }
-        add(searchQuery)
-        add(keywords(searchQuery, 2))
-        add(keywords(imagePrompt, 3))
-        add(keywords(narration, 3))
-        add(keywords(topic, 2))
-        // ricerche sempre più semplici: le archivi gratuiti cercano tutte le parole insieme
-        // (prima le parole che compaiono più spesso nella scena)
-        (keywords(searchQuery, 3) + " " + keywords(imagePrompt, 3) + " " + keywords(narration, 3) + " " + keywords(topic, 2))
-            .split(" ").filter { it.length > 3 }
-            .groupingBy { it }.eachCount()
-            .entries.sortedByDescending { it.value }
-            .forEach { add(it.key) }
-        // al massimo 6 ricerche specifiche (i servizi gratuiti hanno limiti di richieste)
-        val multi = list.filter { ' ' in it }.take(MAX_SPECIFIC - 2)
-        val single = list.filter { ' ' !in it }
-        val specific = (multi + single).take(MAX_SPECIFIC)
-        // ultima spiaggia prima del segnaposto: immagini generiche ma reali
-        return (specific + GENERIC.take(2)).distinct()
+        llmQueries.take(3).forEach(::add)
+        if (list.isEmpty()) {
+            add(searchQuery)
+            add(keywords(imagePrompt, 3))
+            add(keywords(narration, 3))
+        }
+        val themeQuery = clean(theme).ifEmpty { keywords(topic, 1) }.ifEmpty { GENERIC.first() }
+        // il tema va sempre per ultimo, anche se coincide con una delle query
+        list.remove(themeQuery)
+        list += themeQuery
+        return list
     }
 }

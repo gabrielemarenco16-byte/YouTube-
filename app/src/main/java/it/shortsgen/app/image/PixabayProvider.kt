@@ -34,7 +34,10 @@ class PixabayProvider(
             val target = File(dir, "scene_${request.sceneIndex + 1}.mp4")
             client.downloadTo(file.url, target, NAME)
             Log.i(TAG, "Scena ${request.sceneIndex + 1}: video Pixabay ${video.id} per \"$query\" (${file.width}x${file.height})")
-            return SceneMedia(MediaKind.VIDEO, target.absolutePath, NAME, PixabayApi.videoId(video.id))
+            return SceneMedia(
+                MediaKind.VIDEO, target.absolutePath, NAME, PixabayApi.videoId(video.id),
+                query = query, detail = "video ${file.width}x${file.height}, ${video.durationSec} s",
+            )
         }
         for (query in request.queries) {
             val photo = searchPhotos(query).firstOrNull { PixabayApi.photoId(it.id) !in usedIds } ?: continue
@@ -54,7 +57,10 @@ class PixabayProvider(
                 downloaded.delete()
             }
             Log.i(TAG, "Scena ${request.sceneIndex + 1}: foto Pixabay ${photo.id} per \"$query\"")
-            return SceneMedia(MediaKind.IMAGE, target.absolutePath, NAME, PixabayApi.photoId(photo.id))
+            return SceneMedia(
+                MediaKind.IMAGE, target.absolutePath, NAME, PixabayApi.photoId(photo.id),
+                query = query, detail = "foto ${photo.width}x${photo.height}",
+            )
         }
         throw GenerationException(
             "Pixabay: nessun video o foto adatto trovato per la scena ${request.sceneIndex + 1} " +

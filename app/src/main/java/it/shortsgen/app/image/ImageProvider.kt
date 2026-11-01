@@ -15,6 +15,10 @@ data class SceneMedia(
     /** Identificativo univoco del file presso il servizio, per non riusarlo nello stesso video. */
     val sourceId: String = "",
     val placeholder: Boolean = false,
+    /** Ricerca che ha trovato il file (vuota per segnaposto/AI). */
+    val query: String = "",
+    /** Descrizione breve del file scelto (es. "video 1080x1920, 15 s"). */
+    val detail: String = "",
 ) {
     val file: File get() = File(path)
 }

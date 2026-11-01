@@ -35,17 +35,55 @@ object SubtitleChunker {
         }
     }
 
+    /** true se dopo questa parola finisce una frase o c'è una virgola/pausa. */
+    fun endsPhrase(word: String): Boolean {
+        val w = word.trimEnd('"', '\'', ')', '”', '’')
+        return w.endsWith(".") || w.endsWith("!") || w.endsWith("?") || w.endsWith(",") ||
+            w.endsWith(";") || w.endsWith(":") || w.endsWith("—") || w.endsWith("…")
+    }
+
     /**
-     * Raggruppa TUTTE le parole, in ordine, a gruppi di [maxWords].
+     * Divide le parole in frasi (punto, punto esclamativo/interrogativo, virgola, punto e virgola…).
+     * Una frase di una sola parola viene unita alla successiva (o alla precedente se è l'ultima),
+     * così non compare mai una parola da sola.
+     */
+    fun <T> phrases(words: List<T>, text: (T) -> String): List<List<T>> {
+        val result = ArrayList<MutableList<T>>()
+        var current = ArrayList<T>()
+        for (w in words) {
+            current += w
+            if (endsPhrase(text(w))) {
+                result += current
+                current = ArrayList()
+            }
+        }
+        if (current.isNotEmpty()) result += current
+        // unisce le frasi di una parola
+        val merged = ArrayList<MutableList<T>>()
+        var carry: MutableList<T>? = null
+        for (p in result) {
+            val phrase = (carry ?: mutableListOf<T>()).apply { addAll(p) }
+            carry = null
+            if (phrase.size == 1) carry = phrase else merged += phrase
+        }
+        carry?.let { lone -> if (merged.isEmpty()) merged += lone else merged.last().addAll(lone) }
+        return merged
+    }
+
+    /**
+     * Raggruppa TUTTE le parole, in ordine: prima per frasi (o dopo le virgole), poi ogni frase
+     * in righe da massimo [maxWords] parole, mai una parola sola (es. 4 parole = 2+2).
      * Ogni sottotitolo resta visibile fino all'inizio del successivo; l'ultimo fino a [endMs].
      */
     fun chunk(words: List<WordTiming>, maxWords: Int = 3, endMs: Long? = null): List<SubtitleCue> {
         val cues = ArrayList<SubtitleCue>()
-        var index = 0
-        for (size in groupSizes(words.size, maxWords)) {
-            val group = words.subList(index, index + size)
-            index += size
-            cues += SubtitleCue(group.joinToString(" ") { it.word }, group.first().startMs, group.last().endMs)
+        for (phrase in phrases(words) { it.word }) {
+            var index = 0
+            for (size in groupSizes(phrase.size, maxWords)) {
+                val group = phrase.subList(index, index + size)
+                index += size
+                cues += SubtitleCue(group.joinToString(" ") { it.word }, group.first().startMs, group.last().endMs)
+            }
         }
         return cues.mapIndexed { i, c ->
             val next = cues.getOrNull(i + 1)

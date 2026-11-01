@@ -21,9 +21,11 @@ class MediaCollector(
     private val retryDelayMs: Long = 2_000,
     private val pauseBetweenScenesMs: Long = 700,
     private val log: (String) -> Unit = {},
+    /** Una riga per scena: query usata e file scelto (per i log e la schermata del risultato). */
+    private val info: (String) -> Unit = {},
     private val onStatus: (sceneIndex: Int, text: String) -> Unit = { _, _ -> },
 ) {
-    data class Result(val media: List<SceneMedia>, val warnings: List<String>) {
+    data class Result(val media: List<SceneMedia>, val warnings: List<String>, val sceneLog: List<String> = emptyList()) {
         val placeholderCount: Int get() = media.count { it.placeholder }
     }
 
@@ -33,12 +35,14 @@ class MediaCollector(
         /** Provider esclusi (chiave mancante o rifiutata) con il motivo. */
         val disabled = mutableMapOf<String, String>()
         val media = ArrayList<SceneMedia>()
+        val sceneLog = ArrayList<String>()
 
         requests.forEachIndexed { i, request ->
             val cached = existing.getOrNull(i)
             if (cached != null && !cached.placeholder && cached.file.exists() && cached.sourceId !in usedIds) {
                 usedIds += cached.sourceId
                 media += cached
+                sceneLog += describe(i, request, cached, reused = true).also(info)
                 return@forEachIndexed
             }
             var found: SceneMedia? = null
@@ -82,9 +86,20 @@ class MediaCollector(
             }
             usedIds += result.sourceId
             media += result
+            sceneLog += describe(i, request, result, reused = false, cause = errors.lastOrNull()).also(info)
             if (i < requests.lastIndex && found != null) delay(pauseBetweenScenesMs)
         }
-        return Result(media, warnings.distinct())
+        return Result(media, warnings.distinct(), sceneLog)
+    }
+
+    private fun describe(i: Int, request: MediaRequest, m: SceneMedia, reused: Boolean, cause: String? = null): String {
+        val tried = "ricerche: ${request.queries.joinToString(" → ") { "\"$it\"" }}"
+        return if (m.placeholder) {
+            "Scena ${i + 1} | SEGNAPOSTO | $tried | causa: ${cause ?: "nessun servizio configurato"}"
+        } else {
+            "Scena ${i + 1} | query usata: \"${m.query}\" | ${m.source} ${m.sourceId} (${m.detail}) | file: ${m.file.name}" +
+                (if (reused) " | riutilizzato da tentativo precedente" else "") + " | $tried"
+        }
     }
 
     companion object {

@@ -19,9 +19,33 @@ class TimelineTest {
     }
 
     @Test
-    fun sentenceEndDoesNotBreakGroups() {
-        // 4 parole = 2 + 2: il punto non spezza i gruppi
+    fun splitsAtSentencesAndCommasNeverOneWordAlone() {
+        val cues = SubtitleChunker.chunk(timings("Honey never spoils, even after thousands of years. Archaeologists found edible honey in Egyptian tombs."))
+        assertEquals(
+            // frasi: "Honey never spoils," | "even after thousands of years." (5 = 3+2) | 7 parole = 3+2+2
+            listOf("Honey never spoils,", "even after thousands", "of years.", "Archaeologists found edible", "honey in", "Egyptian tombs."),
+            cues.map { it.text },
+        )
+    }
+
+    @Test
+    fun loneWordPhraseIsJoinedToTheNextOne() {
+        // "Wow." da solo non resta mai isolato
         assertEquals(listOf("Wow. This", "is true"), SubtitleChunker.chunk(timings("Wow. This is true")).map { it.text })
+        // all'ultima frase di una parola si unisce la precedente
+        assertEquals(listOf("Follow us", "today, friends!"), SubtitleChunker.chunk(timings("Follow us today, friends!")).map { it.text })
+        assertEquals(listOf("Subscribe now. Bye!"), SubtitleChunker.chunk(timings("Subscribe now. Bye!")).map { it.text })
+    }
+
+    @Test
+    fun noCueHasOneWordOrMoreThanThree() {
+        val text = "Yes. The Eiffel Tower grows, in summer, by about fifteen centimeters because iron expands. Amazing, right? Follow us."
+        val cues = SubtitleChunker.chunk(timings(text))
+        cues.forEach { c ->
+            val n = c.text.split(" ").size
+            assertTrue("\"${c.text}\"", n in 2..3)
+        }
+        assertEquals(text.split(" "), cues.flatMap { it.text.split(" ") })
     }
 
     @Test

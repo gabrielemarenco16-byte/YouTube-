@@ -31,7 +31,8 @@ class MediaCollectorTest {
                 else -> {
                     val id = r.toString()
                     check(id !in usedIds) { "file riusato" }
-                    SceneMedia(MediaKind.VIDEO, File(dir, "$id.mp4").apply { writeText("x") }.path, name, id)
+                    SceneMedia(MediaKind.VIDEO, File(dir, "$id.mp4").apply { writeText("x") }.path, name, id,
+                        query = request.queries.first(), detail = "video 1080x1920")
                 }
             }
         }
@@ -103,5 +104,21 @@ class MediaCollectorTest {
         val sceneWarnings = result.warnings.filter { it.startsWith("ATTENZIONE") }
         assertEquals(3, sceneWarnings.size)
         assertTrue(sceneWarnings.all { it.contains("PEXELS_API_KEY") })
+    }
+
+    @Test
+    fun logsQueryAndFileForEveryScene() = runTest {
+        val infos = mutableListOf<String>()
+        val c = MediaCollector(
+            providers = listOf(Fake("Pixabay")),
+            placeholder = { i, dir -> SceneMedia(MediaKind.IMAGE, File(dir, "ph$i.jpg").path, "segnaposto", "ph-$i", true) },
+            pauseBetweenScenesMs = 0,
+            info = { infos += it },
+        )
+        val result = c.collect(requests(2), tmp.root)
+        assertEquals(2, result.sceneLog.size)
+        assertEquals(result.sceneLog, infos)
+        assertTrue(infos[0].startsWith("Scena 1 | query usata: \"q0\" | Pixabay Pixabay-0"))
+        assertTrue(infos[0].contains("file: Pixabay-0.mp4"))
     }
 }

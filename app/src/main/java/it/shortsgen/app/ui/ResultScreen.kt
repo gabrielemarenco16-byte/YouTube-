@@ -166,6 +166,9 @@ fun ResultScreen(result: GenerationResult, onBack: () -> Unit) {
             CopyField("Titolo", result.title, onCopy = ::copy)
             CopyField("Descrizione", result.description, onCopy = ::copy)
             CopyField("Tag", tagsText, onCopy = ::copy)
+            if (result.sceneLog.isNotEmpty()) {
+                CopyField("Dettagli scene (query e file)", result.sceneLog.joinToString("\n"), onCopy = ::copy)
+            }
         }
     }
 }

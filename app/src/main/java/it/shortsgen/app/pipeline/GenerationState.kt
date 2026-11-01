@@ -48,6 +48,8 @@ data class GenerationResult(
     val thumbnailPath: String,
     val durationSec: Int,
     val warnings: List<String> = emptyList(),
+    /** Per ogni scena: query usata e file scelto. */
+    val sceneLog: List<String> = emptyList(),
     val createdAt: Long = System.currentTimeMillis(),
 )
 

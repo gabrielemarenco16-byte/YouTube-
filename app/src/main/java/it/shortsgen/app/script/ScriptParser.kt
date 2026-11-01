@@ -34,7 +34,8 @@ object ScriptParser {
             val narration = (s.string("narration") ?: s.string("text"))?.let(::cleanNarration).orEmpty()
             val prompt = (s.string("image_prompt") ?: s.string("imagePrompt") ?: s.string("image"))?.trim().orEmpty()
             val query = (s.string("search_query") ?: s.string("searchQuery") ?: s.string("keywords"))?.trim().orEmpty()
-            if (narration.isEmpty()) null else Scene(narration, prompt.ifEmpty { narration }, query)
+            val queries = cleanQueries(stringList(s["search_queries"] ?: s["searchQueries"] ?: s["queries"]))
+            if (narration.isEmpty()) null else Scene(narration, prompt.ifEmpty { narration }, query, queries)
         }
         if (scenes.size < MIN_SCENES) {
             throw GenerationException("Il copione generato ha solo ${scenes.size} scene valide (servono $SCENE_COUNT).")
@@ -49,6 +50,7 @@ object ScriptParser {
         }
 
         val topic = obj.string("topic")?.trim().takeUnless { it.isNullOrEmpty() } ?: title
+        val theme = cleanQueries(listOfNotNull(obj.string("theme"))).firstOrNull().orEmpty()
 
         return VideoScript(
             topic = topic.take(120),
@@ -56,6 +58,7 @@ object ScriptParser {
             description = description.take(MAX_DESCRIPTION),
             tags = tags.distinctBy { it.lowercase() }.take(15),
             scenes = scenes.take(SCENE_COUNT),
+            theme = theme,
         )
     }
 
@@ -67,6 +70,27 @@ object ScriptParser {
         if (start < 0 || end <= start) return text
         return text.substring(start, end + 1)
     }
+
+    private fun stringList(element: JsonElement?): List<String> = when (element) {
+        is JsonArray -> element.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+        is JsonPrimitive -> element.contentOrNull?.split(',', ';').orEmpty()
+        else -> emptyList()
+    }
+
+    /** Parole astratte che non si vedono in un video: una ricerca fatta solo di queste è inutile. */
+    private val ABSTRACT = setOf(
+        "fact", "facts", "curiosity", "mystery", "secret", "truth", "science", "history", "knowledge", "idea",
+        "concept", "amazing", "incredible", "interesting", "surprise", "information", "theory", "reason", "why",
+        "how", "what", "the", "a", "an", "of", "and", "in", "on", "with",
+    )
+
+    /** Ricerche pulite: minuscole, 1-4 parole, senza duplicati e senza query solo astratte. */
+    fun cleanQueries(raw: List<String>): List<String> =
+        raw.map { it.lowercase().replace(Regex("[^a-z0-9 ]"), " ").replace(Regex("\\s+"), " ").trim() }
+            .map { it.split(" ").take(4).joinToString(" ") }
+            .filter { q -> q.isNotEmpty() && q.split(" ").any { it !in ABSTRACT && it.length > 2 } }
+            .distinct()
+            .take(3)
 
     private fun parseTags(element: JsonElement?): List<String> {
         val items = when (element) {

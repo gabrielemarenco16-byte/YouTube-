@@ -53,6 +53,7 @@ class GenerationPipeline(
 ) {
     private val history = TopicHistory(context)
     private val warnings = mutableListOf<String>()
+    private var sceneLog: List<String> = emptyList()
     private var currentPhase = Phase.SCRIPT
 
     val phase: Phase get() = currentPhase
@@ -81,6 +82,7 @@ class GenerationPipeline(
             thumbnailPath = thumbnail.absolutePath,
             durationSec = ((audio.timeline.totalMs + 500) / 1000).toInt(),
             warnings = warnings.toList(),
+            sceneLog = sceneLog,
         )
     }
 
@@ -206,7 +208,14 @@ class GenerationPipeline(
         val requests = script.scenes.mapIndexed { i, scene ->
             MediaRequest(
                 sceneIndex = i,
-                queries = KeywordExtractor.queries(scene.searchQuery, scene.imagePrompt, scene.narration, script.topic),
+                queries = KeywordExtractor.queries(
+                    llmQueries = scene.searchQueries,
+                    theme = script.theme,
+                    searchQuery = scene.searchQuery,
+                    imagePrompt = scene.imagePrompt,
+                    narration = scene.narration,
+                    topic = script.topic,
+                ),
                 prompt = Prompts.imagePrompt(scene.imagePrompt),
                 minDurationMs = timeline.scenes[i].durationMs,
             )
@@ -223,11 +232,14 @@ class GenerationPipeline(
                 }
             },
             log = { Log.w(TAG, it) },
+            info = { Log.i(MEDIA_TAG, it) },
             onStatus = { i, text -> report(Phase.IMAGES, i.toFloat() / script.scenes.size, text) },
         )
         val result = collector.collect(requests, jobDir, existing)
         manifestFile.writeText(Http.json.encodeToString(MediaManifest.serializer(), MediaManifest(result.media)))
         warnings += result.warnings
+        sceneLog = result.sceneLog
+        File(jobDir, "scene_log.txt").writeText(result.sceneLog.joinToString("\n"))
 
         if (requireRealMedia && result.placeholderCount == script.scenes.size) {
             // Nessuna scena riuscita: quasi sempre chiave mancante o non valida. Meglio fermarsi.
@@ -280,5 +292,7 @@ class GenerationPipeline(
 
     private companion object {
         const val TAG = "GenerationPipeline"
+        /** Tag del logcat con query e file scelti per ogni scena: adb logcat -s ShortsMedia */
+        const val MEDIA_TAG = "ShortsMedia"
     }
 }

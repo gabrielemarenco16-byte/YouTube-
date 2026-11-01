@@ -37,7 +37,10 @@ class PexelsProvider(
             val target = File(dir, "scene_${request.sceneIndex + 1}.mp4")
             client.downloadTo(file.link, target, NAME)
             Log.i(TAG, "Scena ${request.sceneIndex + 1}: video Pexels ${video.id} per \"$query\" (${file.width}x${file.height})")
-            return SceneMedia(MediaKind.VIDEO, target.absolutePath, NAME, PexelsApi.videoId(video.id))
+            return SceneMedia(
+                MediaKind.VIDEO, target.absolutePath, NAME, PexelsApi.videoId(video.id),
+                query = query, detail = "video ${file.width}x${file.height}, ${video.durationSec} s",
+            )
         }
         // 2) foto verticali
         for (query in request.queries) {
@@ -51,7 +54,10 @@ class PexelsProvider(
                 downloaded.delete()
             }
             Log.i(TAG, "Scena ${request.sceneIndex + 1}: foto Pexels ${photo.id} per \"$query\"")
-            return SceneMedia(MediaKind.IMAGE, target.absolutePath, NAME, PexelsApi.photoId(photo.id))
+            return SceneMedia(
+                MediaKind.IMAGE, target.absolutePath, NAME, PexelsApi.photoId(photo.id),
+                query = query, detail = "foto",
+            )
         }
         throw GenerationException(
             "Pexels: nessun video o foto adatto trovato per la scena ${request.sceneIndex + 1} " +

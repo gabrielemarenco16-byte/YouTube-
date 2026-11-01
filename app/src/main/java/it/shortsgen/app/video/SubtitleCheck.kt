@@ -19,6 +19,9 @@ object SubtitleCheck {
                 "\"${expected.drop(at).take(4).joinToString(" ")}\", mostrato \"${shown.drop(at).take(4).joinToString(" ")}\""
         }
         cues.filter { it.text.split(" ").size > maxWordsPerCue }.forEach { problems += "Sottotitolo con troppe parole: \"${it.text}\"" }
+        if (expected.size > 1) {
+            cues.filter { it.text.split(" ").size < 2 }.forEach { problems += "Parola isolata nei sottotitoli: \"${it.text}\"" }
+        }
         cues.filter { it.endMs <= it.startMs }.forEach { problems += "Sottotitolo senza durata: \"${it.text}\"" }
         cues.zipWithNext().filter { (a, b) -> b.startMs < a.endMs }.forEach { (a, b) ->
             problems += "Sottotitoli sovrapposti: \"${a.text}\" / \"${b.text}\""

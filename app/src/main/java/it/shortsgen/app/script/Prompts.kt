@@ -23,8 +23,9 @@ Write everything in English. Reply ONLY with a JSON object, no markdown, with ex
   "title": "catchy YouTube Shorts title, max 70 characters, no emojis",
   "description": "2-3 engaging sentences followed by 3-5 hashtags including #shorts",
   "tags": ["8 to 12 short tags"],
+  "theme": "one or two generic English words for the overall visual theme, e.g. chemistry, fire, space, ocean",
   "scenes": [
-    {"narration": "what the narrator says", "image_prompt": "description of the image for this scene", "search_query": "2-4 simple English keywords to find stock footage"}
+    {"narration": "what the narrator says", "image_prompt": "description of the image for this scene", "search_queries": ["first visual query", "second visual query", "third visual query"]}
   ]
 }
 
@@ -34,7 +35,8 @@ Rules:
 - The last scene ends with a punchy closing line and invites viewers to follow for more curiosities.
 - Each narration is 15 to 22 words; the whole script is 110 to 145 words (about 40-50 seconds of speech).
 - Narration is plain spoken text: no emojis, no hashtags, no stage directions, no brackets.
-- Each search_query is 2 to 4 simple, concrete English keywords describing what is visible in the scene, suitable for searching a stock video site (for example "octopus underwater", "night sky stars", "ancient egypt pyramids"). No abstract words, no names of people.
+- Each scene has exactly 3 search_queries for a stock video site, best first. Each query is 1 to 3 concrete English words naming things a camera can film: objects, animals, places or actions (for example "octopus swimming", "coral reef", "lab test tubes", "candle flame", "night sky stars"). NEVER abstract concepts (no "mystery", "fact", "science", "history", "danger", "idea"), no names of people, no brands. Make the 3 queries different from each other and simpler from the first to the third.
+- "theme" is a very common visual subject for the whole video that always has stock footage (for example "chemistry", "fire", "space", "ocean", "forest", "city").
 - Each image_prompt is a vivid, detailed description for an AI image generator: vertical 9:16 composition, photorealistic or cinematic, dramatic lighting, and it must not contain any text, letters, logos or watermarks.
 """.trim()
     }

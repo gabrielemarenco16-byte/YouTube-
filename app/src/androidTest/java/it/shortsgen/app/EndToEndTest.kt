@@ -104,6 +104,7 @@ class EndToEndTest {
         line("Video creato in ${(System.currentTimeMillis() - started) / 1000} s: ${result.title}")
         line("Voce: $voiceKind")
         result.warnings.forEach { line("AVVISO: $it") }
+        result.sceneLog.forEach { line("LOG SCENA: $it") }
 
         val script = Http.json.decodeFromString(VideoScript.serializer(), File(job, "script.json").readText())
         val timeline = Http.json.decodeFromString(Timeline.serializer(), File(job, "timeline.json").readText())
@@ -230,14 +231,22 @@ class EndToEndTest {
             description = "An octopus has three hearts and blue blood. Here is why. #shorts #animals #facts",
             tags = listOf("octopus", "ocean", "animals", "facts", "shorts"),
             scenes = listOf(
-                Scene("Did you know that an octopus has three hearts and bright blue blood?", "octopus underwater", "octopus underwater"),
-                Scene("Two of those hearts pump blood through the gills, where it picks up oxygen.", "octopus gills", "octopus swimming"),
-                Scene("The third heart pushes that blood around the rest of its soft body.", "octopus body", "octopus reef"),
-                Scene("When an octopus swims, that main heart actually stops beating.", "octopus swimming ocean", "ocean swimming"),
-                Scene("That is why octopuses prefer crawling along the sea floor instead.", "sea floor", "sea floor"),
-                Scene("Their blood is blue because it uses copper, not iron, to carry oxygen.", "blue water", "blue ocean"),
-                Scene("Follow us for more incredible curiosities about our amazing planet!", "planet earth", "earth from space"),
+                Scene("Did you know that an octopus has three hearts and bright blue blood?", "octopus underwater",
+                    searchQueries = listOf("octopus underwater", "octopus swimming", "coral reef")),
+                Scene("Two of those hearts pump blood through the gills, where it picks up oxygen.", "octopus gills",
+                    searchQueries = listOf("octopus close up", "fish gills", "underwater bubbles")),
+                Scene("The third heart pushes that blood around the rest of its soft body.", "octopus body",
+                    searchQueries = listOf("octopus tentacles", "squid swimming", "jellyfish")),
+                Scene("When an octopus swims, that main heart actually stops beating.", "octopus swimming ocean",
+                    searchQueries = listOf("octopus swimming", "diver underwater", "ocean water")),
+                Scene("That is why octopuses prefer crawling along the sea floor instead.", "sea floor",
+                    searchQueries = listOf("octopus crawling", "sea floor", "sand underwater")),
+                Scene("Their blood is blue because it uses copper, not iron, to carry oxygen.", "blue water",
+                    searchQueries = listOf("copper metal", "blue liquid", "blue water")),
+                Scene("Follow us for more incredible curiosities about our amazing planet!", "planet earth",
+                    searchQueries = listOf("earth from space", "planet earth", "ocean sunset")),
             ),
+            theme = "ocean",
         )
     }
 }

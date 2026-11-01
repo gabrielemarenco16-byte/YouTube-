@@ -53,7 +53,10 @@ class CloudflareProvider(
             ImageTools.saveJpeg(frame, target)
             frame.recycle()
         }
-        return SceneMedia(MediaKind.IMAGE, target.absolutePath, NAME, "cloudflare-${request.sceneIndex}-${image.size}")
+        return SceneMedia(
+            MediaKind.IMAGE, target.absolutePath, NAME, "cloudflare-${request.sceneIndex}-${image.size}",
+            query = "(immagine AI)", detail = "immagine generata",
+        )
     }
 
     companion object {
