@@ -93,3 +93,61 @@ ciclo, prossimo lotto e risultato del ciclo rispetto all'obiettivo.
 - La martingala può perdere molto in fretta: con moltiplicatore 2 e 8 ordini
   l'ultimo lotto è 128 volte il primo (limitato a 1.00 dal lotto massimo).
   Provala prima nel tester o su un conto demo.
+
+---
+
+## Scalper Bilaterale a Paniere (Expert Advisor MetaTrader 5)
+
+File: [`MQL5/Experts/ScalperBilaterale.mq5`](MQL5/Experts/ScalperBilaterale.mq5)
+
+### Come funziona
+
+1. **Ingresso bilaterale costante**: tiene sempre un **BUY STOP** sopra e un
+   **SELL STOP** sotto il prezzo, a 1 pip (o di più se la volatilità sale).
+   Seguono il prezzo (inseguimento): si avvicinano quando il prezzo si
+   allontana e non si allontanano mai. Così si entra solo quando il prezzo
+   si muove davvero, esattamente al livello del pendente.
+2. **Ordini ravvicinati**: dopo ogni ingresso il pendente successivo nella
+   stessa direzione è ad almeno 2 pips, quindi nel movimento entra un nuovo
+   ordine ogni 2 pips.
+3. **Copertura immediata**: il pendente opposto ha il lotto di tutta
+   l'esposizione del paniere (es. 3 BUY da 0.01 → SELL STOP da 0.03). Se il
+   prezzo si gira, il paniere viene coperto subito; se poi il prezzo continua,
+   riprende a entrare con il lotto base nella nuova direzione.
+4. **Trailing a paniere**: quando tutto il paniere guadagna 5 pips (sul lotto
+   base) parte il trailing; se il profitto scende di 2 pips dal massimo
+   chiude tutto e riparte subito con i nuovi pendenti.
+5. **Size che cresce con il saldo**: di default 0.01 lotti ogni 1000 di
+   saldo (saldo 5000 → 0.05). Il lotto fisso fa da minimo. Anche il trailing
+   si adatta, perché è calcolato in pips sul lotto base.
+6. **Dinamico**: la distanza dei pendenti è il valore più grande tra 1 pip e
+   ATR M1 × 0.3. Con lo spread oltre 50 point non apre nuovi ingressi e tiene
+   solo il pendente di copertura.
+
+### Parametri principali
+
+| Parametro | Default | Cosa fa |
+|---|---|---|
+| Distanza pendenti | 1 pip | Distanza minima dal prezzo |
+| Fattore ATR | 0.3 | Distanza = ATR M1 × fattore se è più grande (0 = fissa) |
+| Passo | 2 pips | Distanza minima tra due ordini nella stessa direzione |
+| Spread massimo | 50 point | Sopra questo spread niente nuovi ingressi (0 = nessun filtro) |
+| Lotto minimo | 0.01 | |
+| Lotti ogni 1000 di saldo | 0.01 | La size cresce con il saldo (0 = sempre il lotto minimo) |
+| Fattore copertura | 1.0 | 1 = copre tutta l'esposizione, 0 = niente copertura |
+| Lotto massimo | 1.00 | Limite per singolo ordine |
+| Posizioni massime | 30 | Al massimo resta solo il pendente di copertura |
+| Avvio trailing | 5 pips | Calcolati sul lotto base |
+| Distanza trailing | 2 pips | Quanto profitto può restituire prima di chiudere |
+| Perdita massima paniere | 0 (off) | In valuta del conto |
+
+### Da sapere
+
+- Serve un conto **hedging**.
+- Ogni ingresso paga lo spread: con il mercato che va su e giù il paniere
+  accumula BUY e SELL coperti e piccoli costi. Guadagna quando arriva un
+  movimento deciso. Se il paniere arriva a 30 posizioni tutto coperto, lo
+  chiude (il risultato di posizioni coperte è già bloccato) e riparte.
+- Nel tester usa **Ogni tick basato su tick reali**: con i tick generati uno
+  scalper da 1–2 pips dà risultati falsi.
+
