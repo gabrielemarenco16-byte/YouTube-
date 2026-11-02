@@ -1,52 +1,56 @@
 //+------------------------------------------------------------------+
 //|                                            ScalperBilaterale.mq5 |
-//|  Scalper dinamico bilaterale a paniere                           |
+//|  Scalper rapido direzionale che opera su entrambi i lati,        |
+//|  uno alla volta (mai BUY e SELL insieme)                         |
 //|                                                                  |
-//|  - Ingresso bilaterale costante: un BUY STOP sopra e un SELL     |
-//|    STOP sotto il prezzo, sempre vicini (1-2 pips). Seguono il    |
-//|    prezzo (inseguimento) finché uno non viene preso: si entra    |
-//|    esattamente quando il prezzo si muove.                        |
-//|  - Ordini ravvicinati: un nuovo ordine ogni 2 pips nella         |
-//|    direzione del movimento.                                      |
-//|  - Copertura immediata: se il prezzo si gira, l'ordine opposto   |
-//|    ha il lotto dell'esposizione del paniere e la copre subito.   |
-//|  - Trailing a paniere: quando il paniere guadagna, insegue il    |
-//|    profitto e chiude tutto se ne restituisce una parte.          |
-//|  - Dinamico: la distanza dei pendenti si allarga con la          |
-//|    volatilità (ATR M1) e la size cresce con il saldo             |
-//|    (default 0.01 lotti ogni 1000 di saldo).                      |
+//|  - Senza operazione aperta: un BUY STOP sopra e un SELL STOP     |
+//|    sotto il prezzo (1 pip) che seguono il prezzo.                |
+//|  - Il primo che viene preso decide la direzione: l'altro viene   |
+//|    cancellato subito.                                            |
+//|  - Massimo 3 ordini, a 2 pips l'uno dall'altro, nella direzione  |
+//|    del movimento.                                                |
+//|  - Trailing stop dinamico vicino al prezzo, uguale per tutti gli |
+//|    ordini: quando viene preso l'operazione finisce e si riparte  |
+//|    subito con i nuovi pendenti, BUY o SELL.                      |
+//|  - Size che cresce con il saldo (0.01 lotti ogni 1000).          |
 //+------------------------------------------------------------------+
 #property copyright   "gabrielemarenco16-byte"
-#property version     "1.00"
-#property description "Scalper bilaterale a paniere: pendenti BUY/SELL STOP a inseguimento,"
-#property description "ordini ravvicinati, copertura immediata e trailing sul profitto del paniere."
-#property description "Richiede un conto hedging."
+#property version     "2.00"
+#property description "Scalper rapido direzionale: BUY o SELL, mai insieme. Pendenti di ingresso a inseguimento,"
+#property description "massimo 3 ordini a 2 pips, trailing stop dinamico vicino al prezzo, size in base al saldo."
 
 #include <Trade\Trade.mqh>
+
+enum ENUM_LATI
+  {
+   LATI_ENTRAMBI  = 0, // BUY e SELL (uno alla volta)
+   LATI_SOLO_BUY  = 1, // Solo BUY
+   LATI_SOLO_SELL = 2  // Solo SELL
+  };
 
 //+------------------------------------------------------------------+
 //| Parametri                                                        |
 //+------------------------------------------------------------------+
-input group "=== Ingresso bilaterale a inseguimento ==="
-input double InpDistanzaPips   = 1.0; // Distanza minima dei pendenti dal prezzo (pips)
-input double InpFattoreATR     = 0.3; // Distanza dinamica: ATR M1 x fattore se piu' grande (0 = fissa)
-input int    InpPeriodoATR     = 14;  // Periodo ATR (M1)
-input double InpPassoPips      = 2.0; // Distanza minima tra due ordini nella stessa direzione (pips)
-input int    InpSpreadMaxPoint = 50;  // Spread massimo per nuovi ingressi (point, 0 = nessun filtro)
+input group "=== Ingresso (BUY o SELL, mai insieme) ==="
+input ENUM_LATI InpLati           = LATI_ENTRAMBI; // Lati su cui operare
+input double    InpDistanzaPips   = 1.0;           // Distanza dei pendenti di ingresso dal prezzo (pips)
+input double    InpFattoreATR     = 0.3;           // Distanza dinamica: ATR M1 x fattore se piu' grande (0 = fissa)
+input int       InpSpreadMaxPoint = 50;            // Spread massimo per entrare (point, 0 = nessun filtro)
 
-input group "=== Lotti e copertura ==="
-input double InpLotto            = 0.01; // Lotto minimo di ogni ingresso
-input double InpLottoOgni1000    = 0.01; // Size che cresce col saldo: lotti ogni 1000 di saldo (0 = lotto fisso)
-input double InpFattoreCopertura = 1.0;  // Copertura immediata: lotto = esposizione opposta x fattore (0 = off)
-input double InpLottoMassimo     = 1.0;  // Lotto massimo per ordine (0 = nessun limite)
-input int    InpMaxPosizioni     = 30;   // Posizioni massime nel paniere
+input group "=== Ordini e lotti ==="
+input int    InpMaxOrdini     = 3;    // Ordini massimi per operazione
+input double InpPassoPips     = 2.0;  // Distanza tra gli ordini (pips, nella direzione del movimento)
+input double InpLotto         = 0.01; // Lotto minimo per ordine
+input double InpLottoOgni1000 = 0.01; // Size che cresce col saldo: lotti ogni 1000 di saldo (0 = lotto fisso)
+input double InpLottoMassimo  = 1.0;  // Lotto massimo per ordine (0 = nessun limite)
 
-input group "=== Trailing a paniere ==="
-input double InpTrailingAvvioPips    = 5; // Il trailing parte quando il paniere guadagna X pips (sul lotto base)
-input double InpTrailingDistanzaPips = 2; // Chiude tutto se il profitto scende di X pips dal massimo
-input double InpPerditaMaxPaniere    = 0; // Chiudi tutto se il paniere perde questa cifra (valuta conto, 0 = off)
+input group "=== Trailing stop dinamico ==="
+input double InpTrailingPips       = 2.0; // Distanza minima dello stop dal prezzo (pips)
+input double InpTrailingFattoreATR = 0.5; // Distanza dinamica: ATR M1 x fattore se piu' grande (0 = fissa)
+input double InpTrailingPassoPips  = 0.2; // Sposta lo stop quando puo' avanzare di almeno (pips)
 
 input group "=== Varie ==="
+input int    InpPeriodoATR    = 14;       // Periodo ATR (M1)
 input long   InpMagic         = 20261103; // Magic number
 input int    InpSlippagePoint = 10;       // Slippage massimo (point)
 input double InpPointPerPip   = 0;        // Point in 1 pip (0 = automatico: 10 su forex 5 cifre e oro)
@@ -56,42 +60,34 @@ input bool   InpPannello      = true;     // Mostra il pannello sul grafico
 //| Stato                                                            |
 //+------------------------------------------------------------------+
 CTrade   g_trade;
-double   g_pipPoints           = 10;   // point in 1 pip
-double   g_pip                 = 0;    // 1 pip in prezzo
-int      g_handleATR           = INVALID_HANDLE;
-bool     g_trailingAttivo      = false;
-double   g_picco               = 0;    // profitto massimo raggiunto dal paniere
-datetime g_pausaFinoA          = 0;
-bool     g_aggiornaCommissioni = true;
-double   g_commissioni         = 0;
-int      g_nPosPrecedente      = -1;
+double   g_pipPoints  = 10;   // point in 1 pip
+double   g_pip        = 0;    // 1 pip in prezzo
+int      g_handleATR  = INVALID_HANDLE;
+datetime g_pausaFinoA = 0;
 
-//--- paniere (riletto a ogni tick)
-int      g_nBuy    = 0;
-int      g_nSell   = 0;
-double   g_volBuy  = 0;
-double   g_volSell = 0;
-double   g_flutt   = 0;
-datetime g_tPrimo  = 0;
-double   g_prezziBuy[];
-double   g_prezziSell[];
-long     g_idPosizioni[];
+//--- operazione aperta (riletta a ogni tick)
+int    g_nBuy          = 0;
+int    g_nSell         = 0;
+double g_prezzoBuyMax  = 0;   // ingresso BUY piu' alto
+double g_prezzoSellMin = 0;   // ingresso SELL piu' basso
+double g_stop          = 0;   // stop attuale dell'operazione
+double g_profitto      = 0;
 
 //+------------------------------------------------------------------+
 int OnInit()
   {
-   if(InpDistanzaPips <= 0 || InpPassoPips < 0 || InpLotto <= 0 || InpLottoOgni1000 < 0 ||
-      InpFattoreCopertura < 0 || InpFattoreATR < 0 || InpPeriodoATR < 1 || InpMaxPosizioni < 2 ||
-      InpTrailingAvvioPips <= 0 || InpTrailingDistanzaPips <= 0 ||
-      InpTrailingDistanzaPips >= InpTrailingAvvioPips)
+   if(InpDistanzaPips <= 0 || InpPassoPips <= 0 || InpMaxOrdini < 1 || InpLotto <= 0 ||
+      InpLottoOgni1000 < 0 || InpFattoreATR < 0 || InpTrailingPips <= 0 ||
+      InpTrailingFattoreATR < 0 || InpTrailingPassoPips < 0 || InpPeriodoATR < 1)
      {
-      Print("Parametri non validi (la distanza del trailing deve essere minore dell'avvio).");
+      Print("Parametri non validi: controlla gli input del bot.");
       return INIT_PARAMETERS_INCORRECT;
      }
 
+   //--- con un conto netting i 3 ordini diventerebbero una sola posizione
    if((ENUM_ACCOUNT_MARGIN_MODE)AccountInfoInteger(ACCOUNT_MARGIN_MODE) != ACCOUNT_MARGIN_MODE_RETAIL_HEDGING)
      {
-      Print("Serve un conto HEDGING: il bot tiene aperti BUY e SELL insieme.");
+      Print("Serve un conto HEDGING: su netting i 3 ordini si fonderebbero in una sola posizione.");
       return INIT_FAILED;
      }
 
@@ -102,15 +98,15 @@ int OnInit()
    g_trade.SetDeviationInPoints((ulong)InpSlippagePoint);
    g_trade.SetTypeFillingBySymbol(_Symbol);
 
-   if(InpFattoreATR > 0)
+   if(InpFattoreATR > 0 || InpTrailingFattoreATR > 0)
      {
       g_handleATR = iATR(_Symbol, PERIOD_M1, InpPeriodoATR);
       if(g_handleATR == INVALID_HANDLE)
-         Print("ATR non disponibile: uso la distanza fissa.");
+         Print("ATR non disponibile: uso le distanze fisse.");
      }
 
-   PrintFormat("Scalper bilaterale su %s: 1 pip = %.0f point, lotto base %.2f, 1 pip sul lotto base = %.2f %s",
-               _Symbol, g_pipPoints, LottoBase(), ValorePipPerLotto() * LottoBase(), AccountInfoString(ACCOUNT_CURRENCY));
+   PrintFormat("Scalper direzionale su %s: 1 pip = %.0f point, lotto %.2f per ordine, max %d ordini a %.1f pips",
+               _Symbol, g_pipPoints, LottoBase(), InpMaxOrdini, InpPassoPips);
    return INIT_SUCCEEDED;
   }
 
@@ -118,126 +114,115 @@ int OnInit()
 void OnDeinit(const int reason)
   {
    if(reason == REASON_REMOVE)
-      CancellaPendenti(); // bot tolto dal grafico: niente pendenti lasciati senza gestione
+      CancellaPendenti(-1); // bot tolto dal grafico: nessun pendente lasciato senza gestione
    if(g_handleATR != INVALID_HANDLE)
       IndicatorRelease(g_handleATR);
    Comment("");
   }
 
 //+------------------------------------------------------------------+
+//| Appena entra un lato cancello subito il pendente dell'altro      |
+//+------------------------------------------------------------------+
 void OnTrade()
   {
-   g_aggiornaCommissioni = true;
+   LeggiPosizioni();
+   if(g_nBuy > 0 && g_nSell == 0)
+      CancellaPendenti(ORDER_TYPE_SELL_STOP);
+   if(g_nSell > 0 && g_nBuy == 0)
+      CancellaPendenti(ORDER_TYPE_BUY_STOP);
   }
 
 //+------------------------------------------------------------------+
 void OnTick()
   {
-   LeggiPaniere();
-   int nPos = g_nBuy + g_nSell;
-   if(nPos != g_nPosPrecedente)
+   LeggiPosizioni();
+
+   //--- mai BUY e SELL insieme (es. due pendenti presi nello stesso istante)
+   if(g_nBuy > 0 && g_nSell > 0)
      {
-      g_aggiornaCommissioni = true;
-      g_nPosPrecedente      = nPos;
+      ChiudiLatoOpposto();
+      return;
      }
 
-   double profitto   = (nPos > 0) ? g_flutt + CommissioniPaniere() : 0;
-   double valorePip  = ValorePipPerLotto() * LottoBase(); // 1 pip sul lotto base, in valuta del conto
-   double netto      = g_volBuy - g_volSell;
-   double mezzoPasso = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP) / 2.0;
-
-   if(nPos > 0)
-     {
-      //--- trailing a paniere
-      if(valorePip > 0)
-        {
-         double avvio    = InpTrailingAvvioPips * valorePip;
-         double distanza = InpTrailingDistanzaPips * valorePip;
-         if(!g_trailingAttivo && profitto >= avvio)
-           {
-            g_trailingAttivo = true;
-            g_picco          = profitto;
-            PrintFormat("Trailing attivo: paniere a %.2f", profitto);
-           }
-         if(g_trailingAttivo)
-           {
-            if(profitto > g_picco)
-               g_picco = profitto;
-            if(profitto <= g_picco - distanza)
-              {
-               ChiudiPaniere("trailing", profitto);
-               Pannello(profitto, valorePip);
-               return;
-              }
-           }
-        }
-
-      //--- protezione facoltativa
-      if(InpPerditaMaxPaniere > 0 && profitto <= -InpPerditaMaxPaniere)
-        {
-         ChiudiPaniere("perdita massima", profitto);
-         Pannello(profitto, valorePip);
-         return;
-        }
-
-      //--- paniere pieno e tutto coperto: non si può più muovere, lo chiudo
-      //    (chiudere posizioni bloccate non cambia il risultato)
-      if(nPos >= InpMaxPosizioni && MathAbs(netto) < mezzoPasso)
-        {
-         ChiudiPaniere("paniere pieno e tutto coperto", profitto);
-         Pannello(profitto, valorePip);
-         return;
-        }
-     }
+   if(g_nBuy == 0 && g_nSell == 0)
+      GestisciIngresso();
    else
      {
-      g_trailingAttivo = false;
-      g_picco          = 0;
+      ENUM_POSITION_TYPE dir = (g_nBuy > 0) ? POSITION_TYPE_BUY : POSITION_TYPE_SELL;
+      CancellaPendenti(dir == POSITION_TYPE_BUY ? ORDER_TYPE_SELL_STOP : ORDER_TYPE_BUY_STOP);
+      Trailing(dir);
+      GestisciAggiunte(dir);
      }
 
-   GestisciPendenti(nPos, netto);
-   Pannello(profitto, valorePip);
+   Pannello();
   }
 
 //+------------------------------------------------------------------+
-//| Pendenti bilaterali: un BUY STOP sopra e un SELL STOP sotto      |
+//| Nessuna operazione: BUY STOP sopra e SELL STOP sotto il prezzo,  |
+//| con lo stop gia' attaccato, che seguono il prezzo                |
 //+------------------------------------------------------------------+
-void GestisciPendenti(int nPos, double netto)
+void GestisciIngresso()
   {
    if(TimeCurrent() < g_pausaFinoA)
       return;
+   MqlTick t;
+   if(!SymbolInfoTick(_Symbol, t) || t.ask <= 0 || t.bid <= 0)
+      return;
+
+   double spread   = t.ask - t.bid;
+   bool   spreadOk = SpreadOk(spread);
+   double distanza = DistanzaIngresso();
+   double trailing = DistanzaTrailing();
+   double lotto    = LottoBase();
+
+   double livBuy  = ArrotondaTick(t.ask + distanza, true);
+   double slBuy   = ArrotondaTick(livBuy - spread - trailing, false);
+   double livSell = ArrotondaTick(t.bid - distanza, false);
+   double slSell  = ArrotondaTick(livSell + spread + trailing, true);
+
+   GestisciPendente(ORDER_TYPE_BUY_STOP, spreadOk && InpLati != LATI_SOLO_SELL, livBuy, slBuy, lotto, true);
+   GestisciPendente(ORDER_TYPE_SELL_STOP, spreadOk && InpLati != LATI_SOLO_BUY, livSell, slSell, lotto, true);
+  }
+
+//+------------------------------------------------------------------+
+//| Operazione aperta: ordine successivo a "passo" pips dall'ultimo, |
+//| nella stessa direzione, fino al massimo degli ordini             |
+//+------------------------------------------------------------------+
+void GestisciAggiunte(ENUM_POSITION_TYPE dir)
+  {
+   ENUM_ORDER_TYPE tipo = (dir == POSITION_TYPE_BUY) ? ORDER_TYPE_BUY_STOP : ORDER_TYPE_SELL_STOP;
+   int             n    = (dir == POSITION_TYPE_BUY) ? g_nBuy : g_nSell;
 
    MqlTick t;
    if(!SymbolInfoTick(_Symbol, t) || t.ask <= 0 || t.bid <= 0)
       return;
 
-   double mezzoPasso = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP) / 2.0;
-   bool   spreadOk   = (InpSpreadMaxPoint <= 0) ||
-                       (t.ask - t.bid <= InpSpreadMaxPoint * _Point + _Point / 2.0);
-
-   //--- spread troppo alto o paniere pieno: resta solo il pendente di copertura
-   bool vuoiBuy  = true;
-   bool vuoiSell = true;
-   if(!spreadOk || nPos >= InpMaxPosizioni)
-     {
-      vuoiBuy  = InpFattoreCopertura > 0 && netto < -mezzoPasso;
-      vuoiSell = InpFattoreCopertura > 0 && netto > mezzoPasso;
-     }
-
-   double distanza = DistanzaPrezzo();
+   double spread   = t.ask - t.bid;
+   bool   vuoi     = SpreadOk(spread) && n < InpMaxOrdini;
+   double minimo   = DistanzaMinimaBroker();
    double passo    = InpPassoPips * g_pip;
+   double trailing = DistanzaTrailing();
 
-   GestisciLato(ORDER_TYPE_BUY_STOP, vuoiBuy, LivelloBuyStop(t.ask, distanza, passo),
-                LottoPendente(ORDER_TYPE_BUY_STOP, netto));
-   GestisciLato(ORDER_TYPE_SELL_STOP, vuoiSell, LivelloSellStop(t.bid, distanza, passo),
-                LottoPendente(ORDER_TYPE_SELL_STOP, netto));
+   double livello, sl;
+   if(dir == POSITION_TYPE_BUY)
+     {
+      livello = ArrotondaTick(MathMax(g_prezzoBuyMax + passo, t.ask + minimo), true);
+      sl      = ArrotondaTick(livello - spread - trailing, false);
+     }
+   else
+     {
+      livello = ArrotondaTick(MathMin(g_prezzoSellMin - passo, t.bid - minimo), false);
+      sl      = ArrotondaTick(livello + spread + trailing, true);
+     }
+   GestisciPendente(tipo, vuoi, livello, sl, LottoBase(), false);
   }
 
 //+------------------------------------------------------------------+
-//| Un lato: piazza, sostituisce (lotto cambiato) o avvicina al      |
-//| prezzo il pendente (inseguimento)                                |
+//| Un pendente: lo piazza, lo sostituisce se il lotto e' cambiato,  |
+//| lo sposta al nuovo livello. Con "soloVersoPrezzo" si avvicina al |
+//| prezzo e non si allontana mai (inseguimento).                    |
 //+------------------------------------------------------------------+
-void GestisciLato(ENUM_ORDER_TYPE tipo, bool vuoi, double livello, double lotto)
+void GestisciPendente(ENUM_ORDER_TYPE tipo, bool vuoi, double livello, double sl, double lotto, bool soloVersoPrezzo)
   {
    ulong  ticket = 0;
    double prezzo = 0;
@@ -252,7 +237,7 @@ void GestisciLato(ENUM_ORDER_TYPE tipo, bool vuoi, double livello, double lotto)
          continue;
       if((ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE) != tipo)
          continue;
-      if(!vuoi || ticket != 0) // non serve, oppure è un doppione
+      if(!vuoi || ticket != 0) // non serve, oppure e' un doppione
         {
          Cancella(tk);
          continue;
@@ -267,49 +252,209 @@ void GestisciLato(ENUM_ORDER_TYPE tipo, bool vuoi, double livello, double lotto)
 
    if(ticket == 0)
      {
-      Piazza(tipo, livello, lotto);
+      Piazza(tipo, livello, sl, lotto);
       return;
      }
 
-   //--- lotto da cambiare (es. è diventato un ordine di copertura): sostituisco
    if(MathAbs(volume - lotto) >= SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP) / 2.0)
      {
       if(Cancella(ticket))
-         Piazza(tipo, livello, lotto);
+         Piazza(tipo, livello, sl, lotto);
       return;
      }
 
-   //--- inseguimento: il pendente si avvicina al prezzo, non si allontana mai
    double soglia = MathMax(0.3 * g_pip, SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE));
-   bool avvicina = (tipo == ORDER_TYPE_BUY_STOP) ? (prezzo - livello >= soglia)
-                                                 : (livello - prezzo >= soglia);
-   if(avvicina)
-      Modifica(ticket, livello);
+   double verso  = (tipo == ORDER_TYPE_BUY_STOP) ? prezzo - livello : livello - prezzo; // > 0 = piu' vicino al prezzo
+   bool   sposta = soloVersoPrezzo ? (verso >= soglia) : (MathAbs(verso) >= soglia);
+   if(sposta)
+      Modifica(ticket, livello, sl);
   }
 
 //+------------------------------------------------------------------+
-//| Livelli dei pendenti, distanziati di "passo" dagli ordini aperti |
-//| nella stessa direzione                                           |
+//| Trailing stop unico per tutti gli ordini dell'operazione: segue  |
+//| il prezzo a distanza dinamica e si muove solo a favore           |
 //+------------------------------------------------------------------+
-double LivelloBuyStop(double ask, double distanza, double passo)
+void Trailing(ENUM_POSITION_TYPE dir)
   {
-   double livello = ask + distanza;
-   if(passo > 0)
-      for(int i = 0; i < ArraySize(g_prezziBuy); i++) // prezzi in ordine crescente
-         if(MathAbs(livello - g_prezziBuy[i]) < passo)
-            livello = g_prezziBuy[i] + passo;
-   return ArrotondaTick(livello, true);
+   if(TimeCurrent() < g_pausaFinoA)
+      return;
+   MqlTick t;
+   if(!SymbolInfoTick(_Symbol, t) || t.ask <= 0 || t.bid <= 0)
+      return;
+
+   double trailing = DistanzaTrailing();
+   double passo    = MathMax(InpTrailingPassoPips * g_pip, SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE));
+   double minimo   = DistanzaMinimaBroker();
+
+   //--- livello comune: il piu' stretto tra gli stop attuali e il prezzo meno la distanza
+   double nuovo = (dir == POSITION_TYPE_BUY) ? ArrotondaTick(t.bid - trailing, false)
+                                             : ArrotondaTick(t.ask + trailing, true);
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+     {
+      if(!SelezionaPosizione(i, dir))
+         continue;
+      double sl = PositionGetDouble(POSITION_SL);
+      if(sl <= 0)
+         continue;
+      if(dir == POSITION_TYPE_BUY && sl > nuovo)
+         nuovo = sl;
+      if(dir == POSITION_TYPE_SELL && sl < nuovo)
+         nuovo = sl;
+     }
+
+   //--- troppo vicino al prezzo per il broker: aspetto
+   if(dir == POSITION_TYPE_BUY && t.bid - nuovo < minimo)
+      return;
+   if(dir == POSITION_TYPE_SELL && nuovo - t.ask < minimo)
+      return;
+
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+     {
+      if(!SelezionaPosizione(i, dir))
+         continue;
+      ulong  ticket = (ulong)PositionGetInteger(POSITION_TICKET);
+      double sl     = PositionGetDouble(POSITION_SL);
+      double tp     = PositionGetDouble(POSITION_TP);
+      bool migliora = (sl <= 0) ||
+                      (dir == POSITION_TYPE_BUY ? nuovo - sl >= passo : sl - nuovo >= passo);
+      if(!migliora)
+         continue;
+      if(!Esito(g_trade.PositionModify(ticket, nuovo, tp), "spostamento stop"))
+         return;
+     }
   }
 
 //+------------------------------------------------------------------+
-double LivelloSellStop(double bid, double distanza, double passo)
+//| Seleziona la posizione i se e' del bot e della direzione data    |
+//+------------------------------------------------------------------+
+bool SelezionaPosizione(int i, ENUM_POSITION_TYPE dir)
   {
-   double livello = bid - distanza;
-   if(passo > 0)
-      for(int i = ArraySize(g_prezziSell) - 1; i >= 0; i--) // dal più alto al più basso
-         if(MathAbs(livello - g_prezziSell[i]) < passo)
-            livello = g_prezziSell[i] - passo;
-   return ArrotondaTick(livello, false);
+   ulong ticket = PositionGetTicket(i);
+   if(ticket == 0)
+      return false;
+   if(PositionGetInteger(POSITION_MAGIC) != InpMagic || PositionGetString(POSITION_SYMBOL) != _Symbol)
+      return false;
+   return (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE) == dir;
+  }
+
+//+------------------------------------------------------------------+
+//| Se ci sono BUY e SELL insieme tengo la direzione entrata per     |
+//| prima e chiudo l'altra                                           |
+//+------------------------------------------------------------------+
+void ChiudiLatoOpposto()
+  {
+   long tPrimo    = LONG_MAX;
+   long tipoPrimo = -1;
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+     {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0)
+         continue;
+      if(PositionGetInteger(POSITION_MAGIC) != InpMagic || PositionGetString(POSITION_SYMBOL) != _Symbol)
+         continue;
+      long tms = PositionGetInteger(POSITION_TIME_MSC);
+      if(tms < tPrimo)
+        {
+         tPrimo    = tms;
+         tipoPrimo = PositionGetInteger(POSITION_TYPE);
+        }
+     }
+
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+     {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0)
+         continue;
+      if(PositionGetInteger(POSITION_MAGIC) != InpMagic || PositionGetString(POSITION_SYMBOL) != _Symbol)
+         continue;
+      if(PositionGetInteger(POSITION_TYPE) != tipoPrimo)
+         Esito(g_trade.PositionClose(ticket), "chiusura lato opposto");
+     }
+   Print("BUY e SELL aperti insieme: chiuso il lato entrato per secondo.");
+  }
+
+//+------------------------------------------------------------------+
+//| Lettura dell'operazione aperta                                   |
+//+------------------------------------------------------------------+
+void LeggiPosizioni()
+  {
+   g_nBuy          = 0;
+   g_nSell         = 0;
+   g_prezzoBuyMax  = 0;
+   g_prezzoSellMin = 0;
+   g_stop          = 0;
+   g_profitto      = 0;
+
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+     {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0)
+         continue;
+      if(PositionGetInteger(POSITION_MAGIC) != InpMagic || PositionGetString(POSITION_SYMBOL) != _Symbol)
+         continue;
+
+      double prezzo = PositionGetDouble(POSITION_PRICE_OPEN);
+      double sl     = PositionGetDouble(POSITION_SL);
+      g_profitto += PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
+
+      if(PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY)
+        {
+         g_nBuy++;
+         if(prezzo > g_prezzoBuyMax)
+            g_prezzoBuyMax = prezzo;
+         if(sl > g_stop)
+            g_stop = sl;
+        }
+      else
+        {
+         g_nSell++;
+         if(g_prezzoSellMin == 0 || prezzo < g_prezzoSellMin)
+            g_prezzoSellMin = prezzo;
+         if(sl > 0 && (g_stop == 0 || sl < g_stop))
+            g_stop = sl;
+        }
+     }
+  }
+
+//+------------------------------------------------------------------+
+//| Distanze                                                         |
+//+------------------------------------------------------------------+
+double ValoreATR()
+  {
+   if(g_handleATR == INVALID_HANDLE)
+      return 0;
+   double atr[];
+   if(CopyBuffer(g_handleATR, 0, 1, 1, atr) != 1)
+      return 0;
+   return atr[0];
+  }
+
+//+------------------------------------------------------------------+
+double DistanzaMinimaBroker()
+  {
+   double livelloStop   = (double)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
+   double livelloFreeze = (double)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_FREEZE_LEVEL);
+   return (MathMax(livelloStop, livelloFreeze) + 1.0) * _Point;
+  }
+
+//+------------------------------------------------------------------+
+double DistanzaIngresso()
+  {
+   double d = MathMax(InpDistanzaPips * g_pip, ValoreATR() * InpFattoreATR);
+   return MathMax(d, DistanzaMinimaBroker());
+  }
+
+//+------------------------------------------------------------------+
+double DistanzaTrailing()
+  {
+   double d = MathMax(InpTrailingPips * g_pip, ValoreATR() * InpTrailingFattoreATR);
+   return MathMax(d, DistanzaMinimaBroker());
+  }
+
+//+------------------------------------------------------------------+
+bool SpreadOk(double spread)
+  {
+   return (InpSpreadMaxPoint <= 0) || (spread <= InpSpreadMaxPoint * _Point + _Point / 2.0);
   }
 
 //+------------------------------------------------------------------+
@@ -324,45 +469,12 @@ double ArrotondaTick(double prezzo, bool versoAlto)
   }
 
 //+------------------------------------------------------------------+
-//| Distanza dinamica dei pendenti dal prezzo                        |
-//+------------------------------------------------------------------+
-double DistanzaPrezzo()
-  {
-   double d = InpDistanzaPips * g_pip;
-   if(g_handleATR != INVALID_HANDLE)
-     {
-      double atr[];
-      if(CopyBuffer(g_handleATR, 0, 1, 1, atr) == 1 && atr[0] > 0)
-         d = MathMax(d, atr[0] * InpFattoreATR);
-     }
-   //--- mai sotto la distanza minima del broker
-   double livelloStop   = (double)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
-   double livelloFreeze = (double)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_FREEZE_LEVEL);
-   double minimo        = (MathMax(livelloStop, livelloFreeze) + 1.0) * _Point;
-   return MathMax(d, minimo);
-  }
-
-//+------------------------------------------------------------------+
-//| Lotto del pendente: base, oppure copertura dell'esposizione      |
-//+------------------------------------------------------------------+
-double LottoPendente(ENUM_ORDER_TYPE tipo, double netto)
-  {
-   double lotto = LottoBase();
-   if(InpFattoreCopertura > 0)
-     {
-      if(tipo == ORDER_TYPE_BUY_STOP && netto < 0)
-         lotto = MathMax(lotto, -netto * InpFattoreCopertura);
-      if(tipo == ORDER_TYPE_SELL_STOP && netto > 0)
-         lotto = MathMax(lotto, netto * InpFattoreCopertura);
-     }
-   return NormalizzaLotto(lotto);
-  }
-
+//| Lotti: la size cresce con il saldo, mai sotto il lotto minimo    |
 //+------------------------------------------------------------------+
 double LottoBase()
   {
    double lotto = InpLotto;
-   if(InpLottoOgni1000 > 0) // la size cresce con il saldo, mai sotto il lotto minimo
+   if(InpLottoOgni1000 > 0)
       lotto = MathMax(InpLotto, AccountInfoDouble(ACCOUNT_BALANCE) / 1000.0 * InpLottoOgni1000);
    return NormalizzaLotto(lotto);
   }
@@ -390,45 +502,54 @@ double NormalizzaLotto(double lotto)
   }
 
 //+------------------------------------------------------------------+
-//| Operazioni                                                       |
+//| Operazioni sui pendenti                                          |
 //+------------------------------------------------------------------+
-bool Piazza(ENUM_ORDER_TYPE tipo, double livello, double lotto)
+bool Piazza(ENUM_ORDER_TYPE tipo, double livello, double sl, double lotto)
   {
-   bool   copertura = lotto > LottoBase() + SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP) / 2.0;
-   string commento  = copertura ? "SB copertura" : "SB ingresso";
-
-   //--- per gli ingressi controllo il margine (le coperture riducono il rischio)
-   if(!copertura)
+   double          margine = 0;
+   ENUM_ORDER_TYPE mercato = (tipo == ORDER_TYPE_BUY_STOP) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+   if(!OrderCalcMargin(mercato, _Symbol, lotto, livello, margine) ||
+      margine > AccountInfoDouble(ACCOUNT_MARGIN_FREE))
      {
-      double margine = 0;
-      ENUM_ORDER_TYPE mercato = (tipo == ORDER_TYPE_BUY_STOP) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
-      if(!OrderCalcMargin(mercato, _Symbol, lotto, livello, margine) ||
-         margine > AccountInfoDouble(ACCOUNT_MARGIN_FREE))
-        {
-         PrintFormat("Margine insufficiente per %.2f lotti: pendente non piazzato.", lotto);
-         g_pausaFinoA = TimeCurrent() + 60;
-         return false;
-        }
+      PrintFormat("Margine insufficiente per %.2f lotti: pendente non piazzato.", lotto);
+      g_pausaFinoA = TimeCurrent() + 60;
+      return false;
      }
 
    bool ok = (tipo == ORDER_TYPE_BUY_STOP)
-             ? g_trade.BuyStop(lotto, livello, _Symbol, 0, 0, ORDER_TIME_GTC, 0, commento)
-             : g_trade.SellStop(lotto, livello, _Symbol, 0, 0, ORDER_TIME_GTC, 0, commento);
+             ? g_trade.BuyStop(lotto, livello, _Symbol, sl, 0, ORDER_TIME_GTC, 0, "SR buy")
+             : g_trade.SellStop(lotto, livello, _Symbol, sl, 0, ORDER_TIME_GTC, 0, "SR sell");
    return Esito(ok, "piazzamento pendente");
   }
 
 //+------------------------------------------------------------------+
-bool Modifica(ulong ticket, double livello)
+bool Modifica(ulong ticket, double livello, double sl)
   {
-   bool ok = g_trade.OrderModify(ticket, livello, 0, 0, ORDER_TIME_GTC, 0);
-   return Esito(ok, "spostamento pendente");
+   return Esito(g_trade.OrderModify(ticket, livello, sl, 0, ORDER_TIME_GTC, 0), "spostamento pendente");
   }
 
 //+------------------------------------------------------------------+
 bool Cancella(ulong ticket)
   {
-   bool ok = g_trade.OrderDelete(ticket);
-   return Esito(ok, "cancellazione pendente");
+   return Esito(g_trade.OrderDelete(ticket), "cancellazione pendente");
+  }
+
+//+------------------------------------------------------------------+
+//| Cancella i pendenti del bot di un tipo (-1 = tutti)              |
+//+------------------------------------------------------------------+
+void CancellaPendenti(int tipo)
+  {
+   for(int i = OrdersTotal() - 1; i >= 0; i--)
+     {
+      ulong tk = OrderGetTicket(i);
+      if(tk == 0)
+         continue;
+      if(OrderGetInteger(ORDER_MAGIC) != InpMagic || OrderGetString(ORDER_SYMBOL) != _Symbol)
+         continue;
+      if(tipo >= 0 && OrderGetInteger(ORDER_TYPE) != tipo)
+         continue;
+      g_trade.OrderDelete(tk);
+     }
   }
 
 //+------------------------------------------------------------------+
@@ -442,146 +563,6 @@ bool Esito(bool ok, const string operazione)
    PrintFormat("Errore %s: %u %s", operazione, rc, g_trade.ResultRetcodeDescription());
    g_pausaFinoA = TimeCurrent() + 1;
    return false;
-  }
-
-//+------------------------------------------------------------------+
-void CancellaPendenti()
-  {
-   for(int i = OrdersTotal() - 1; i >= 0; i--)
-     {
-      ulong tk = OrderGetTicket(i);
-      if(tk == 0)
-         continue;
-      if(OrderGetInteger(ORDER_MAGIC) != InpMagic || OrderGetString(ORDER_SYMBOL) != _Symbol)
-         continue;
-      g_trade.OrderDelete(tk);
-     }
-  }
-
-//+------------------------------------------------------------------+
-void ChiudiPaniere(const string motivo, double profitto)
-  {
-   CancellaPendenti(); // prima i pendenti, così non entrano mentre chiudo
-
-   int  chiuse = 0;
-   bool tutto  = true;
-   for(int i = PositionsTotal() - 1; i >= 0; i--)
-     {
-      ulong ticket = PositionGetTicket(i);
-      if(ticket == 0)
-         continue;
-      if(PositionGetInteger(POSITION_MAGIC) != InpMagic || PositionGetString(POSITION_SYMBOL) != _Symbol)
-         continue;
-      if(g_trade.PositionClose(ticket))
-         chiuse++;
-      else
-        {
-         tutto = false;
-         PrintFormat("Errore chiusura posizione: %u %s", g_trade.ResultRetcode(), g_trade.ResultRetcodeDescription());
-        }
-     }
-
-   PrintFormat("Paniere chiuso (%s): %d posizioni, risultato circa %.2f %s%s", motivo, chiuse, profitto,
-               AccountInfoString(ACCOUNT_CURRENCY), tutto ? "" : " - alcune posizioni non chiuse, riprovo");
-   if(tutto)
-     {
-      g_trailingAttivo = false;
-      g_picco          = 0;
-     }
-   g_aggiornaCommissioni = true;
-  }
-
-//+------------------------------------------------------------------+
-//| Lettura del paniere                                              |
-//+------------------------------------------------------------------+
-void LeggiPaniere()
-  {
-   g_nBuy    = 0;
-   g_nSell   = 0;
-   g_volBuy  = 0;
-   g_volSell = 0;
-   g_flutt   = 0;
-   g_tPrimo  = 0;
-   ArrayResize(g_prezziBuy, 0);
-   ArrayResize(g_prezziSell, 0);
-   ArrayResize(g_idPosizioni, 0);
-
-   for(int i = PositionsTotal() - 1; i >= 0; i--)
-     {
-      ulong ticket = PositionGetTicket(i);
-      if(ticket == 0)
-         continue;
-      if(PositionGetInteger(POSITION_MAGIC) != InpMagic || PositionGetString(POSITION_SYMBOL) != _Symbol)
-         continue;
-
-      double volume = PositionGetDouble(POSITION_VOLUME);
-      double prezzo = PositionGetDouble(POSITION_PRICE_OPEN);
-      g_flutt += PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
-
-      datetime t = (datetime)PositionGetInteger(POSITION_TIME);
-      if(g_tPrimo == 0 || t < g_tPrimo)
-         g_tPrimo = t;
-
-      int n = ArraySize(g_idPosizioni);
-      ArrayResize(g_idPosizioni, n + 1);
-      g_idPosizioni[n] = PositionGetInteger(POSITION_IDENTIFIER);
-
-      if(PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY)
-        {
-         g_nBuy++;
-         g_volBuy += volume;
-         int k = ArraySize(g_prezziBuy);
-         ArrayResize(g_prezziBuy, k + 1);
-         g_prezziBuy[k] = prezzo;
-        }
-      else
-        {
-         g_nSell++;
-         g_volSell += volume;
-         int k = ArraySize(g_prezziSell);
-         ArrayResize(g_prezziSell, k + 1);
-         g_prezziSell[k] = prezzo;
-        }
-     }
-   ArraySort(g_prezziBuy);
-   ArraySort(g_prezziSell);
-  }
-
-//+------------------------------------------------------------------+
-//| Commissioni già pagate dalle posizioni aperte del paniere        |
-//+------------------------------------------------------------------+
-double CommissioniPaniere()
-  {
-   if(g_tPrimo == 0)
-     {
-      g_commissioni = 0;
-      return 0;
-     }
-   if(!g_aggiornaCommissioni)
-      return g_commissioni;
-   if(!HistorySelect(g_tPrimo, TimeCurrent() + 86400))
-      return g_commissioni;
-
-   double somma = 0;
-   int    n     = ArraySize(g_idPosizioni);
-   for(int i = HistoryDealsTotal() - 1; i >= 0; i--)
-     {
-      ulong deal = HistoryDealGetTicket(i);
-      if(deal == 0)
-         continue;
-      long posizione = HistoryDealGetInteger(deal, DEAL_POSITION_ID);
-      for(int k = 0; k < n; k++)
-        {
-         if(g_idPosizioni[k] == posizione)
-           {
-            somma += HistoryDealGetDouble(deal, DEAL_COMMISSION) + HistoryDealGetDouble(deal, DEAL_FEE);
-            break;
-           }
-        }
-     }
-   g_commissioni         = somma;
-   g_aggiornaCommissioni = false;
-   return somma;
   }
 
 //+------------------------------------------------------------------+
@@ -602,17 +583,7 @@ double CalcolaPointPerPip()
   }
 
 //+------------------------------------------------------------------+
-double ValorePipPerLotto()
-  {
-   double valoreTick = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
-   double dimTick    = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
-   if(valoreTick <= 0 || dimTick <= 0)
-      return 0;
-   return g_pip / dimTick * valoreTick;
-  }
-
-//+------------------------------------------------------------------+
-void Pannello(double profitto, double valorePip)
+void Pannello()
   {
    if(!InpPannello)
       return;
@@ -624,18 +595,17 @@ void Pannello(double profitto, double valorePip)
       return;
    string valuta = AccountInfoString(ACCOUNT_CURRENCY);
 
-   string testo = "SCALPER BILATERALE A PANIERE\n";
-   testo += StringFormat("Spread %.1f pips  |  distanza pendenti %.1f pips  |  passo %.1f pips\n",
-                         (t.ask - t.bid) / g_pip, DistanzaPrezzo() / g_pip, InpPassoPips);
-   testo += StringFormat("Lotto base %.2f  (saldo %.2f %s)\n", LottoBase(), AccountInfoDouble(ACCOUNT_BALANCE), valuta);
-   testo += StringFormat("BUY %d (%.2f lotti)  |  SELL %d (%.2f lotti)  |  netto %.2f\n",
-                         g_nBuy, g_volBuy, g_nSell, g_volSell, g_volBuy - g_volSell);
-   testo += StringFormat("Paniere %.2f %s", profitto, valuta);
-   if(g_trailingAttivo)
-      testo += StringFormat("  |  trailing attivo: massimo %.2f, chiude sotto %.2f",
-                            g_picco, g_picco - InpTrailingDistanzaPips * valorePip);
+   string testo = "SCALPER RAPIDO DIREZIONALE\n";
+   testo += StringFormat("Spread %.1f pips  |  ingresso a %.1f pips  |  trailing a %.1f pips\n",
+                         (t.ask - t.bid) / g_pip, DistanzaIngresso() / g_pip, DistanzaTrailing() / g_pip);
+   testo += StringFormat("Lotto %.2f per ordine (saldo %.2f %s)  |  max %d ordini a %.1f pips\n",
+                         LottoBase(), AccountInfoDouble(ACCOUNT_BALANCE), valuta, InpMaxOrdini, InpPassoPips);
+   if(g_nBuy > 0 || g_nSell > 0)
+      testo += StringFormat("Operazione %s: %d/%d ordini  |  stop %s  |  profitto %.2f %s\n",
+                            g_nBuy > 0 ? "BUY" : "SELL", g_nBuy + g_nSell, InpMaxOrdini,
+                            DoubleToString(g_stop, _Digits), g_profitto, valuta);
    else
-      testo += StringFormat("  |  trailing parte da %.2f", InpTrailingAvvioPips * valorePip);
-   Comment(testo + "\n");
+      testo += "Nessuna operazione: pendenti BUY e SELL in attesa\n";
+   Comment(testo);
   }
 //+------------------------------------------------------------------+
