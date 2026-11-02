@@ -3,16 +3,18 @@
 //|  Martingala a griglia con 3 fasi decise dall'ampiezza del range: |
 //|                                                                  |
 //|  FASE 1 laterale      range <= 300 pips  -> ordini ogni 30 pips  |
-//|                                             SL 500 point         |
 //|  FASE 2 allargamento  range <  2000 pips -> ordini ogni 150 pips |
-//|                       (range/8 se più grande) SL 650 point       |
+//|                       (range/8 se più grande)                    |
 //|  FASE 3               range >= 2000 pips -> nessun nuovo ordine  |
+//|                                                                  |
+//|  Stop loss spento di default (per il tester): si riattiva dagli  |
+//|  input "Stop loss" di fase 1 e fase 2 (es. 500 e 650 point).     |
 //+------------------------------------------------------------------+
 #property copyright   "gabrielemarenco16-byte"
-#property version     "1.00"
-#property description "Martingala a 3 fasi: laterale (griglia 30 pips, SL 500 point),"
-#property description "allargamento sotto i 2000 pips (griglia 150 pips o range/8, SL 650 point),"
-#property description "oltre i 2000 pips nessun nuovo ordine. Richiede un conto hedging."
+#property version     "1.01"
+#property description "Martingala a 3 fasi: laterale (griglia 30 pips),"
+#property description "allargamento sotto i 2000 pips (griglia 150 pips o range/8),"
+#property description "oltre i 2000 pips nessun nuovo ordine. Stop loss spento di default. Conto hedging."
 
 #include <Trade\Trade.mqh>
 
@@ -43,12 +45,12 @@ input double          InpRangeMaxPips         = 2000;      // FASE 2 se il range
 
 input group "=== FASE 1 - Mercato laterale ==="
 input double InpStepFase1Pips = 30;  // Distanza tra gli ordini (pips)
-input int    InpSLFase1Point  = 500; // Stop loss di ogni ordine (point, 0 = nessuno)
+input int    InpSLFase1Point  = 0;   // Stop loss di ogni ordine (point, 0 = nessuno; es. 500)
 
 input group "=== FASE 2 - Il range si allarga ==="
 input double InpStepFase2Pips   = 150;  // Distanza minima tra gli ordini (pips)
 input double InpDivisoreFase2   = 8;    // Se range/divisore e' piu' grande usa quello (0 = fissa)
-input int    InpSLFase2Point    = 650;  // Stop loss di ogni ordine (point, 0 = nessuno)
+input int    InpSLFase2Point    = 0;    // Stop loss di ogni ordine (point, 0 = nessuno; es. 650)
 input bool   InpNuoviCicliFase2 = true; // Aprire nuovi cicli anche in fase 2
 
 input group "=== Martingala ==="
@@ -373,11 +375,11 @@ bool Apri(ENUM_ORDER_TYPE tipo, ENUM_FASE fase)
    g_pausaFinoA         = TimeCurrent() + 1; // evita doppi ordini mentre la posizione si registra
    SalvaStato();
 
-   PrintFormat("%s ordine %d/%d: %s %.2f lotti a %s, SL %s (%d point)",
+   PrintFormat("%s ordine %d/%d: %s %.2f lotti a %s, SL %s",
                NomeFase(fase), g_ordiniCiclo, InpMaxOrdiniCiclo,
                tipo == ORDER_TYPE_BUY ? "BUY" : "SELL", lotto,
                DoubleToString(g_ultimoPrezzo, _Digits),
-               sl > 0 ? DoubleToString(sl, _Digits) : "nessuno", slPoint);
+               sl > 0 ? DoubleToString(sl, _Digits) + " (" + IntegerToString(slPoint) + " point)" : "nessuno");
    return true;
   }
 
@@ -745,8 +747,8 @@ void AggiornaPannello(ENUM_FASE fase, double rangePips, double risultato, double
    if(fase == FASE_3_STOP)
       testo += "Nessun nuovo ordine: il range ha superato il limite\n";
    else
-      testo += StringFormat("Distanza ordini %.1f pips  |  SL %d point\n",
-                            DistanzaPips(fase, rangePips), StopLossPoint(fase));
+      testo += StringFormat("Distanza ordini %.1f pips  |  SL %s\n", DistanzaPips(fase, rangePips),
+                            StopLossPoint(fase) > 0 ? IntegerToString(StopLossPoint(fase)) + " point" : "nessuno");
    if(g_cicloAttivo)
      {
       testo += StringFormat("Ciclo: %d/%d ordini  |  prossimo lotto %.2f\n",
