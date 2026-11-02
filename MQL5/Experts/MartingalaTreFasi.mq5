@@ -9,9 +9,13 @@
 //|                                                                  |
 //|  Stop loss spento di default (per il tester): si riattiva dagli  |
 //|  input "Stop loss" di fase 1 e fase 2 (es. 500 e 650 point).     |
+//|                                                                  |
+//|  Ingresso da scalper: appena non c'e' un ciclo aperto entra       |
+//|  subito, BUY se il prezzo e' nella meta' bassa dell'ultima ora    |
+//|  (M5 x 12), SELL se e' nella meta' alta.                          |
 //+------------------------------------------------------------------+
 #property copyright   "gabrielemarenco16-byte"
-#property version     "1.01"
+#property version     "1.02"
 #property description "Martingala a 3 fasi: laterale (griglia 30 pips),"
 #property description "allargamento sotto i 2000 pips (griglia 150 pips o range/8),"
 #property description "oltre i 2000 pips nessun nuovo ordine. Stop loss spento di default. Conto hedging."
@@ -61,9 +65,11 @@ input int    InpMaxOrdiniCiclo      = 8;    // Ordini massimi per ciclo
 input double InpTPCicloPips         = 40;   // Obiettivo del ciclo (pips calcolati sul lotto iniziale)
 input double InpMaxPerditaCicloPerc = 0;    // Chiudi tutto se il ciclo perde questa % del saldo (0 = off)
 
-input group "=== Ingresso ==="
-input ENUM_DIREZIONE InpDirezione        = DIR_AUTOMATICA; // Direzione degli ingressi
-input double         InpZonaIngressoPerc = 30;             // BUY nel X% basso del range, SELL nel X% alto
+input group "=== Ingresso (scalper) ==="
+input ENUM_DIREZIONE  InpDirezione        = DIR_AUTOMATICA; // Direzione degli ingressi
+input ENUM_TIMEFRAMES InpTFIngresso       = PERIOD_M5;      // Timeframe del range di ingresso
+input int             InpBarreIngresso    = 12;             // Candele del range di ingresso (12 x M5 = ultima ora)
+input double          InpZonaIngressoPerc = 50;             // BUY nel X% basso, SELL nel X% alto (50 = entra sempre)
 
 input group "=== Varie ==="
 input long   InpMagic         = 20261102; // Magic number
@@ -93,7 +99,7 @@ int OnInit()
    if(InpBarreRange < 2 || InpStepFase1Pips <= 0 || InpStepFase2Pips <= 0 ||
       InpLottoIniziale <= 0 || InpMoltiplicatore < 1.0 || InpMaxOrdiniCiclo < 1 ||
       InpTPCicloPips <= 0 || InpRangeLateraleMaxPips >= InpRangeMaxPips ||
-      InpZonaIngressoPerc <= 0 || InpZonaIngressoPerc > 100)
+      InpBarreIngresso < 1 || InpZonaIngressoPerc <= 0 || InpZonaIngressoPerc > 100)
      {
       Print("Parametri non validi: controlla gli input dell'EA.");
       return INIT_PARAMETERS_INCORRECT;
@@ -219,12 +225,12 @@ void OnTick()
    if(fase != FASE_3_STOP && TimeCurrent() >= g_pausaFinoA)
      {
       if(g_cicloAttivo)
-         GestisciGriglia(fase, rangePips, massimo, minimo, nPos);
+         GestisciGriglia(fase, rangePips, nPos);
       else
          if(fase == FASE_1_LATERALE || InpNuoviCicliFase2)
            {
             ENUM_ORDER_TYPE tipo = ORDER_TYPE_BUY;
-            if(SegnaleIngresso(massimo, minimo, tipo))
+            if(SegnaleIngresso(tipo))
                Apri(tipo, fase);
            }
      }
@@ -235,7 +241,7 @@ void OnTick()
 //+------------------------------------------------------------------+
 //| Griglia: aggiunge ordini quando il prezzo va contro              |
 //+------------------------------------------------------------------+
-void GestisciGriglia(ENUM_FASE fase, double rangePips, double massimo, double minimo, int nPos)
+void GestisciGriglia(ENUM_FASE fase, double rangePips, int nPos)
   {
    if(g_ordiniCiclo >= InpMaxOrdiniCiclo)
       return;
@@ -249,7 +255,7 @@ void GestisciGriglia(ENUM_FASE fase, double rangePips, double massimo, double mi
    //--- nessun riferimento valido (caso anomalo): riparto dal segnale
    if(g_dirCiclo < 0 || g_ultimoPrezzo <= 0)
      {
-      if(nPos == 0 && SegnaleIngresso(massimo, minimo, tipo))
+      if(nPos == 0 && SegnaleIngresso(tipo))
          Apri(tipo, fase);
       return;
      }
@@ -272,7 +278,7 @@ void GestisciGriglia(ENUM_FASE fase, double rangePips, double massimo, double mi
    //--- 2) tutto chiuso in stop loss e il prezzo si è girato dall'altra parte del range:
    //       riparte nella direzione opposta, sempre con il lotto della martingala
    //       e sempre ad almeno "distanza" dall'ultimo ordine
-   if(nPos == 0 && SegnaleIngresso(massimo, minimo, tipo) && (int)tipo != g_dirCiclo)
+   if(nPos == 0 && SegnaleIngresso(tipo) && (int)tipo != g_dirCiclo)
      {
       bool lontano = (tipo == ORDER_TYPE_BUY) ? (t.ask <= g_ultimoPrezzo - distanza)
                                                : (t.bid >= g_ultimoPrezzo + distanza);
@@ -282,12 +288,37 @@ void GestisciGriglia(ENUM_FASE fase, double rangePips, double massimo, double mi
   }
 
 //+------------------------------------------------------------------+
-//| Segnale di ingresso: BUY nella parte bassa del range, SELL alta  |
+//| Range breve usato per l'ingresso (default ultima ora in M5)      |
 //+------------------------------------------------------------------+
-bool SegnaleIngresso(double massimo, double minimo, ENUM_ORDER_TYPE &tipo)
+bool CalcolaRangeIngresso(double &massimo, double &minimo)
+  {
+   int barre = InpBarreIngresso;
+   int disponibili = iBars(_Symbol, InpTFIngresso);
+   if(disponibili < 1)
+      return false;
+   if(barre > disponibili)
+      barre = disponibili;
+   int iMax = iHighest(_Symbol, InpTFIngresso, MODE_HIGH, barre, 0);
+   int iMin = iLowest(_Symbol, InpTFIngresso, MODE_LOW, barre, 0);
+   if(iMax < 0 || iMin < 0)
+      return false;
+   massimo = iHigh(_Symbol, InpTFIngresso, iMax);
+   minimo  = iLow(_Symbol, InpTFIngresso, iMin);
+   return (massimo > 0 && minimo > 0 && massimo >= minimo);
+  }
+
+//+------------------------------------------------------------------+
+//| Segnale di ingresso: BUY nella parte bassa del range breve,      |
+//| SELL nella parte alta. Con zona 50% c'e' sempre un segnale.       |
+//+------------------------------------------------------------------+
+bool SegnaleIngresso(ENUM_ORDER_TYPE &tipo)
   {
    MqlTick t;
    if(!SymbolInfoTick(_Symbol, t))
+      return false;
+
+   double massimo = 0, minimo = 0;
+   if(!CalcolaRangeIngresso(massimo, minimo))
       return false;
 
    double ampiezza = massimo - minimo;
@@ -749,6 +780,8 @@ void AggiornaPannello(ENUM_FASE fase, double rangePips, double risultato, double
    else
       testo += StringFormat("Distanza ordini %.1f pips  |  SL %s\n", DistanzaPips(fase, rangePips),
                             StopLossPoint(fase) > 0 ? IntegerToString(StopLossPoint(fase)) + " point" : "nessuno");
+   testo += StringFormat("Ingresso: range %s ultime %d candele, zona %.0f%%\n",
+                         StringSubstr(EnumToString(InpTFIngresso), 7), InpBarreIngresso, InpZonaIngressoPerc);
    if(g_cicloAttivo)
      {
       testo += StringFormat("Ciclo: %d/%d ordini  |  prossimo lotto %.2f\n",

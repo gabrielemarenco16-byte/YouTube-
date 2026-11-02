@@ -26,9 +26,11 @@ griglia stretta da 30 pips mentre è già in perdita.
 
 ### Come funziona un ciclo
 
-1. **Ingresso**: compra se il prezzo è nel 30% basso del range, vende se è nel
-   30% alto (in un mercato laterale il prezzo tende a tornare indietro).
-   Puoi anche scegliere solo BUY o solo SELL.
+1. **Ingresso (scalper)**: appena non c'è un ciclo aperto entra subito.
+   Guarda l'ultima ora (12 candele M5): compra se il prezzo è nella metà
+   bassa, vende se è nella metà alta. Con la zona sotto il 50% entra solo
+   vicino ai bordi (es. 30% = solo nel 30% basso o alto). Puoi anche scegliere
+   solo BUY o solo SELL (con solo BUY e zona 100% compra sempre).
 2. **Martingala**: ogni volta che il prezzo va contro l'ultimo ordine della
    distanza della fase (30 o 150 pips), l'EA apre un nuovo ordine nella stessa
    direzione con il lotto moltiplicato (0.01 → 0.02 → 0.04 → …).
@@ -60,7 +62,8 @@ griglia stretta da 30 pips mentre è già in perdita.
 | Ordini massimi per ciclo | 8 | |
 | Obiettivo ciclo | 40 pips | Calcolato sul lotto iniziale (XAUUSD 0.01 → circa 4 $) |
 | Perdita massima ciclo | 0 (off) | Chiude tutto se il ciclo perde questa % del saldo |
-| Zona di ingresso | 30% | |
+| Timeframe / candele di ingresso | M5 / 12 | Range breve per decidere BUY o SELL |
+| Zona di ingresso | 50% | 50 = entra sempre; più basso = più selettivo |
 | Point in 1 pip | 0 (automatico) | 10 su forex a 5 cifre e sull'oro (1 pip = 0.10) |
 
 Ricorda: **1 pip = 10 point** sul forex a 5 cifre e sull'oro.
