@@ -139,7 +139,7 @@ a ogni movimento di 1 pip con stop a 2 pips e veniva mangiato dallo spread.
 | Timeframe trend / EMA | M5 / 50 e 200 | Direzione del trend |
 | ADX minimo | 20 | Forza minima del trend (0 = nessun filtro) |
 | Timeframe ingresso | M1 | Decide a ogni candela |
-| Ingresso pullback / rottura | sì / sì | Si possono spegnere uno alla volta |
+| Ingresso pullback / rottura | sì / no | La rottura su M1 dà più falsi segnali |
 | EMA pullback | 20 | |
 | Candele rottura | 5 | |
 | Candela massima | ATR × 2.5 | Oltre = spike, niente ingresso |
@@ -154,6 +154,22 @@ a ogni movimento di 1 pip con stop a 2 pips e veniva mangiato dallo spread.
 | Operazioni massime al giorno | 0 (nessun limite) | |
 | Spread massimo | 40 point | |
 | Orario | 9–21 (ora del server) | Inizio = fine → sempre |
+
+### Diario delle operazioni (per renderlo più preciso)
+
+Per ogni operazione il bot scrive una riga in
+`ScalperTrend_diario_<simbolo>.csv`, nella cartella **Common\Files** di
+MetaTrader (MetaEditor → *File → Apri cartella dati comune* → `Files`; il
+percorso esatto è scritto nel Diario/Journal all'avvio). Nel tester il file
+riparte vuoto a ogni prova.
+
+Colonne: apertura, ora, direzione, tipo di ingresso, spread, ATR, stop (pips),
+lotto, ordini, `mfe_R` (quanto è andata a favore, in multipli dello stop),
+`mae_R` (quanto è andata contro), risultato, risultato in R, tipo di uscita
+(stop iniziale / pareggio / trailing / take profit).
+
+Con questo file si vede dove perde (ore, tipo di ingresso, spread, uscite
+troppo presto) e si correggono i parametri sui numeri veri.
 
 ### Da sapere
 

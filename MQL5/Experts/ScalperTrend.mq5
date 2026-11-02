@@ -24,7 +24,7 @@
 //|    operazioni al giorno ci sono ma sono spenti di default.       |
 //+------------------------------------------------------------------+
 #property copyright   "gabrielemarenco16-byte"
-#property version     "4.00"
+#property version     "4.10"
 #property description "Scalper dinamico a favore di trend: ingressi M1 (pullback o rottura) confermati entro 1 minuto,"
 #property description "stop ATR, pareggio e trailing,"
 #property description "size a rischio % del saldo (cresce con il capitale)."
@@ -51,7 +51,7 @@ input double          InpADXMin     = 20;         // Forza minima del trend (ADX
 input group "=== Ingresso preciso e veloce ==="
 input ENUM_TIMEFRAMES InpTFIngresso       = PERIOD_M1;     // Timeframe di ingresso (decide a ogni candela)
 input bool            InpIngressoPullback = true;          // Ingresso sul pullback all'EMA
-input bool            InpIngressoRottura  = true;          // Ingresso sulla rottura delle ultime candele
+input bool            InpIngressoRottura  = false;         // Ingresso sulla rottura delle ultime candele (piu' falsi segnali)
 input int             InpEMAPullback      = 20;            // EMA del pullback
 input int             InpBarrePullback    = 3;             // Il pullback deve toccare l'EMA nelle ultime N candele
 input int             InpBarreRottura     = 5;             // Rottura: chiusura oltre il max/min delle ultime N candele
@@ -88,6 +88,7 @@ input long   InpMagic         = 20261104; // Magic number
 input int    InpSlippagePoint = 10;       // Slippage massimo (point)
 input double InpPointPerPip   = 0;        // Point in 1 pip (0 = automatico: 10 su forex 5 cifre e oro)
 input bool   InpPannello      = true;     // Mostra il pannello sul grafico
+input bool   InpDiario        = true;     // Diario delle operazioni in CSV (cartella Common/Files)
 
 //+------------------------------------------------------------------+
 //| Stato                                                            |
@@ -129,6 +130,24 @@ double g_tpAttuale      = 0;
 double g_profitto       = 0;
 double g_sommaVol       = 0;
 double g_sommaVolPrezzo = 0;
+datetime g_tPrimo       = 0;    // apertura del primo ordine
+
+//--- diario: dati del segnale e dell'operazione in corso
+string   g_segTipo   = "";
+double   g_segSpread = 0;       // pips
+double   g_segATR    = 0;       // pips
+bool     g_opAttiva  = false;
+datetime g_opInizio  = 0;
+int      g_opDir     = 0;
+string   g_opTipo    = "";
+double   g_opSpread  = 0;
+double   g_opATR     = 0;
+double   g_opEntrata = 0;
+double   g_opR       = 0;       // distanza dello stop iniziale (prezzo)
+double   g_opLotto   = 0;
+double   g_opMFE     = 0;       // massimo movimento a favore (prezzo)
+double   g_opMAE     = 0;       // massimo movimento contro (prezzo)
+int      g_opOrdini  = 0;
 
 //+------------------------------------------------------------------+
 int OnInit()
@@ -175,6 +194,12 @@ int OnInit()
 
    PrintFormat("Scalper trend su %s: 1 pip = %.0f point, rischio %.1f%% per operazione, max %d ordini",
                _Symbol, g_pipPoints, InpRischioPerc, g_maxOrdini);
+   if(InpDiario)
+     {
+      if(MQLInfoInteger(MQL_TESTER))
+         FileDelete(NomeDiario(), FILE_COMMON); // ogni test riparte da un diario vuoto
+      PrintFormat("Diario operazioni: %s\\Files\\%s", TerminalInfoString(TERMINAL_COMMONDATA_PATH), NomeDiario());
+     }
    return INIT_SUCCEEDED;
   }
 
@@ -203,6 +228,7 @@ void OnTick()
    LeggiPosizioni();
    LeggiStoricoOggi();
    int nPos = g_nBuy + g_nSell;
+   Diario(nPos);
 
    //--- stop giornaliero: chiudo tutto e non entro piu' fino a domani
    if(StopGiornaliero())
@@ -398,7 +424,10 @@ void CercaSegnale()
       g_sl      = ArrotondaTick(g_livello + slDist, true);
       g_tp      = (InpTPR > 0) ? ArrotondaTick(g_livello - slDist * InpTPR, false) : 0;
      }
-   g_segnale  = segnale;
+   g_segnale   = segnale;
+   g_segTipo   = tipo;
+   g_segSpread = spread / g_pip;
+   g_segATR    = atr / g_pip;
    g_scadenza = TimeCurrent() + InpValiditaBarre * PeriodSeconds(InpTFIngresso);
    CancellaPendenti(); // un eventuale pendente vecchio viene sostituito
 
@@ -713,6 +742,7 @@ void LeggiPosizioni()
    g_profitto       = 0;
    g_sommaVol       = 0;
    g_sommaVolPrezzo = 0;
+   g_tPrimo         = 0;
    long tPrimo      = LONG_MAX;
 
    for(int i = PositionsTotal() - 1; i >= 0; i--)
@@ -734,6 +764,7 @@ void LeggiPosizioni()
       if(tms < tPrimo)
         {
          tPrimo        = tms;
+         g_tPrimo      = (datetime)PositionGetInteger(POSITION_TIME);
          g_primoPrezzo = prezzo;
          g_primoVolume = volume;
          g_tpAttuale   = PositionGetDouble(POSITION_TP);
@@ -756,6 +787,149 @@ void LeggiPosizioni()
             g_stop = sl;
         }
      }
+  }
+
+//+------------------------------------------------------------------+
+//| Diario: segue ogni operazione e, quando finisce, scrive una riga |
+//| nel CSV con ingresso, condizioni, movimento massimo e risultato  |
+//+------------------------------------------------------------------+
+string NomeDiario()
+  {
+   return "ScalperTrend_diario_" + _Symbol + ".csv";
+  }
+
+//+------------------------------------------------------------------+
+void Diario(int nPos)
+  {
+   if(!InpDiario)
+      return;
+
+   if(nPos > 0)
+     {
+      if(!g_opAttiva) // operazione appena cominciata
+        {
+         g_opAttiva  = true;
+         g_opInizio  = g_tPrimo;
+         g_opDir     = (g_nBuy > 0) ? 1 : -1;
+         g_opTipo    = (g_segTipo != "") ? g_segTipo : "ripresa";
+         g_opSpread  = g_segSpread;
+         g_opATR     = g_segATR;
+         g_opEntrata = g_primoPrezzo;
+         g_opR       = (g_stop > 0) ? MathAbs(g_primoPrezzo - g_stop) : 0;
+         g_opLotto   = g_primoVolume;
+         g_opMFE     = 0;
+         g_opMAE     = 0;
+         g_opOrdini  = 0;
+        }
+      if(nPos > g_opOrdini)
+         g_opOrdini = nPos;
+      MqlTick t;
+      if(SymbolInfoTick(_Symbol, t))
+        {
+         double favore = (g_opDir > 0) ? t.bid - g_opEntrata : g_opEntrata - t.ask;
+         if(favore > g_opMFE)
+            g_opMFE = favore;
+         if(-favore > g_opMAE)
+            g_opMAE = -favore;
+        }
+      return;
+     }
+
+   if(!g_opAttiva)
+      return;
+   g_opAttiva = false;
+   ScriviDiario();
+  }
+
+//+------------------------------------------------------------------+
+void ScriviDiario()
+  {
+   double risultato = 0;
+   long   motivo    = -1;
+   if(HistorySelect(g_opInizio - 1, TimeCurrent() + 86400))
+     {
+      //--- posizioni aperte dal bot in questa operazione
+      long ids[];
+      int  nIds   = 0;
+      int  totale = HistoryDealsTotal();
+      for(int i = 0; i < totale; i++)
+        {
+         ulong deal = HistoryDealGetTicket(i);
+         if(deal == 0)
+            continue;
+         if(HistoryDealGetInteger(deal, DEAL_MAGIC) != InpMagic || HistoryDealGetString(deal, DEAL_SYMBOL) != _Symbol)
+            continue;
+         if(HistoryDealGetInteger(deal, DEAL_ENTRY) != DEAL_ENTRY_IN ||
+            (datetime)HistoryDealGetInteger(deal, DEAL_TIME) < g_opInizio)
+            continue;
+         ArrayResize(ids, nIds + 1);
+         ids[nIds] = HistoryDealGetInteger(deal, DEAL_POSITION_ID);
+         nIds++;
+        }
+      //--- risultato di tutti i deal di quelle posizioni e motivo dell'ultima uscita
+      long ultimaUscita = 0;
+      for(int i = 0; i < totale; i++)
+        {
+         ulong deal = HistoryDealGetTicket(i);
+         if(deal == 0)
+            continue;
+         long posizione = HistoryDealGetInteger(deal, DEAL_POSITION_ID);
+         bool nostra    = false;
+         for(int k = 0; k < nIds; k++)
+            if(ids[k] == posizione)
+              {
+               nostra = true;
+               break;
+              }
+         if(!nostra)
+            continue;
+         risultato += HistoryDealGetDouble(deal, DEAL_PROFIT) + HistoryDealGetDouble(deal, DEAL_SWAP) +
+                      HistoryDealGetDouble(deal, DEAL_COMMISSION) + HistoryDealGetDouble(deal, DEAL_FEE);
+         long tms = HistoryDealGetInteger(deal, DEAL_TIME_MSC);
+         if(HistoryDealGetInteger(deal, DEAL_ENTRY) == DEAL_ENTRY_OUT && tms >= ultimaUscita)
+           {
+            ultimaUscita = tms;
+            motivo       = HistoryDealGetInteger(deal, DEAL_REASON);
+           }
+        }
+     }
+
+   double rischio = g_opLotto * g_opR * ValorePrezzoPerLotto(); // 1R in valuta del conto
+   double risR    = (rischio > 0) ? risultato / rischio : 0;
+   string uscita  = "chiusura bot";
+   if(motivo == DEAL_REASON_TP)
+      uscita = "take profit";
+   else
+      if(motivo == DEAL_REASON_SL)
+        {
+         if(risR <= -0.8)
+            uscita = "stop iniziale";
+         else
+            if(risR < 0.2)
+               uscita = "pareggio";
+            else
+               uscita = "trailing";
+        }
+
+   MqlDateTime d;
+   TimeToStruct(g_opInizio, d);
+
+   int h = FileOpen(NomeDiario(), FILE_READ | FILE_WRITE | FILE_CSV | FILE_ANSI | FILE_COMMON, ';');
+   if(h == INVALID_HANDLE)
+     {
+      Print("Diario: impossibile aprire il file.");
+      return;
+     }
+   FileSeek(h, 0, SEEK_END);
+   if(FileSize(h) == 0)
+      FileWrite(h, "apertura", "ora", "direzione", "ingresso", "spread_pips", "atr_pips", "stop_pips", "lotto",
+                "ordini", "mfe_R", "mae_R", "risultato", "risultato_R", "uscita");
+   FileWrite(h, TimeToString(g_opInizio, TIME_DATE | TIME_MINUTES), d.hour, g_opDir > 0 ? "BUY" : "SELL", g_opTipo,
+             DoubleToString(g_opSpread, 1), DoubleToString(g_opATR, 1), DoubleToString(g_opR / g_pip, 1),
+             DoubleToString(g_opLotto, 2), g_opOrdini,
+             DoubleToString(g_opR > 0 ? g_opMFE / g_opR : 0, 2), DoubleToString(g_opR > 0 ? g_opMAE / g_opR : 0, 2),
+             DoubleToString(risultato, 2), DoubleToString(risR, 2), uscita);
+   FileClose(h);
   }
 
 //+------------------------------------------------------------------+
