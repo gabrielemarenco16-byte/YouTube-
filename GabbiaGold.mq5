@@ -32,7 +32,7 @@ input double InpTP_Principale = 0.0;  // Take profit delle principali in USD di 
 input double InpTP_Copertura  = 1.0;  // Take profit delle coperture in USD di prezzo
 input int    InpMaxCoperture  = 1;    // Numero massimo di coperture aperte contemporaneamente
 input int    InpCooldownSec   = 5;    // Pausa minima in secondi tra un'apertura e la successiva
-input double InpBasketTP      = 0.0;  // Basket TP: profitto netto totale in valuta del conto (EUR) per chiudere tutto (0 = disattivato)
+input double InpBasketTP_EUR      = 0.0;  // Basket TP: profitto netto totale in valuta del conto (EUR) per chiudere tutto (0 = disattivato)
 
 input group "=== Commissioni ==="
 input double InpCommissioneLottoRT = 6.0;   // Commissione andata+ritorno per 1 lotto, in valuta del conto (usata per il profitto netto)
@@ -73,6 +73,8 @@ struct StatoPosizioni
    int                nCop;              // numero coperture
    int                nPrincBuy;         // principali BUY
    int                nPrincSell;        // principali SELL
+   int                nCopBuy;           // coperture BUY
+   int                nCopSell;          // coperture SELL
    double             prezzoUltimaPrinc; // prezzo di apertura dell'ultima principale
    long               tempoUltimaPrinc;  // orario (ms) dell'ultima principale
    double             volumePrinc;       // volume dell'ultima principale
@@ -103,6 +105,43 @@ double   g_point            = 0.01;
 double   g_tickSize         = 0.01;
 string   g_prefGV           = "";     // prefisso delle GlobalVariable
 string   g_statoFiltri      = "";     // testo per il pannello
+ENUM_ORDER_TYPE_FILLING g_filling = ORDER_FILLING_FOK; // modalità di riempimento in uso
+
+//+------------------------------------------------------------------+
+//| ESECUZIONE: modalità di riempimento                              |
+//|  Usa SetTypeFillingBySymbol; se il broker la rifiuta             |
+//|  (INVALID_FILL) prova la successiva: FOK -> IOC -> RETURN        |
+//+------------------------------------------------------------------+
+void ImpostaFilling()
+  {
+   long flag = SymbolInfoInteger(_Symbol, SYMBOL_FILLING_MODE);
+   if(g_trade.SetTypeFillingBySymbol(_Symbol))
+     {
+      if((flag & SYMBOL_FILLING_FOK) == SYMBOL_FILLING_FOK)
+         g_filling = ORDER_FILLING_FOK;
+      else
+         g_filling = ORDER_FILLING_IOC;
+     }
+   else
+     {
+      g_filling = ORDER_FILLING_RETURN;
+      g_trade.SetTypeFilling(g_filling);
+     }
+   PrintFormat("GabbiaGold: modalità di riempimento %s", EnumToString(g_filling));
+  }
+
+void CambiaFilling()
+  {
+   if(g_filling == ORDER_FILLING_FOK)
+      g_filling = ORDER_FILLING_IOC;
+   else
+      if(g_filling == ORDER_FILLING_IOC)
+         g_filling = ORDER_FILLING_RETURN;
+      else
+         g_filling = ORDER_FILLING_FOK;
+   g_trade.SetTypeFilling(g_filling);
+   PrintFormat("GabbiaGold: riempimento rifiutato dal broker, passo a %s", EnumToString(g_filling));
+  }
 
 //+------------------------------------------------------------------+
 //| UTILITÀ: GlobalVariable con prefisso                             |
@@ -217,6 +256,7 @@ void ScanPosizioni(StatoPosizioni &s)
          continue;
 
       double vol = PositionGetDouble(POSITION_VOLUME);
+      ENUM_POSITION_TYPE tipo = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
       // profitto netto stimato se chiudessimo adesso (commissione completa andata+ritorno)
       s.profittoNetto += PositionGetDouble(POSITION_PROFIT)
                          + PositionGetDouble(POSITION_SWAP)
@@ -225,7 +265,6 @@ void ScanPosizioni(StatoPosizioni &s)
       if(magic == g_magicPrinc)
         {
          s.nPrinc++;
-         ENUM_POSITION_TYPE tipo = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
          if(tipo == POSITION_TYPE_BUY)
             s.nPrincBuy++;
          else
@@ -240,7 +279,13 @@ void ScanPosizioni(StatoPosizioni &s)
            }
         }
       else
+        {
          s.nCop++;
+         if(tipo == POSITION_TYPE_BUY)
+            s.nCopBuy++;
+         else
+            s.nCopSell++;
+        }
      }
   }
 
@@ -283,6 +328,7 @@ bool ApriPosizione(const ENUM_ORDER_TYPE tipo, const double lotto,
                    const long magic, const string etichetta)
   {
    g_ultimaApertura = TimeCurrent();   // il cooldown parte anche se l'ordine fallisce
+   int cambiFilling = 0;
 
    for(int tentativo = 1; tentativo <= InpMaxTentativi; tentativo++)
      {
@@ -353,6 +399,13 @@ bool ApriPosizione(const ENUM_ORDER_TYPE tipo, const double lotto,
 
       PrintFormat("GabbiaGold: apertura %s fallita (tentativo %d/%d) - retcode %u: %s",
                   etichetta, tentativo, InpMaxTentativi, rc, g_trade.ResultRetcodeDescription());
+      if(rc == TRADE_RETCODE_INVALID_FILL && cambiFilling < 2)
+        {
+         CambiaFilling();
+         cambiFilling++;
+         tentativo--;                       // il cambio di riempimento non consuma un tentativo
+         continue;
+        }
       if(!ErroreRitentabile(rc))
          return false;
       Sleep(300);
@@ -366,6 +419,7 @@ bool ApriPosizione(const ENUM_ORDER_TYPE tipo, const double lotto,
 //+------------------------------------------------------------------+
 bool ChiudiPosizione(const ulong ticket)
   {
+   int cambiFilling = 0;
    for(int tentativo = 1; tentativo <= InpMaxTentativi; tentativo++)
      {
       if(!PositionSelectByTicket(ticket))
@@ -381,6 +435,13 @@ bool ChiudiPosizione(const ulong ticket)
       uint err = g_trade.ResultRetcode();
       PrintFormat("GabbiaGold: chiusura ticket %I64u fallita (tentativo %d/%d) - retcode %u: %s",
                   ticket, tentativo, InpMaxTentativi, err, g_trade.ResultRetcodeDescription());
+      if(err == TRADE_RETCODE_INVALID_FILL && cambiFilling < 2)
+        {
+         CambiaFilling();
+         cambiFilling++;
+         tentativo--;
+         continue;
+        }
       if(!ErroreRitentabile(err))
          return false;
       Sleep(300);
@@ -408,7 +469,8 @@ bool ChiudiTutto(const string motivo)
          long magic = PositionGetInteger(POSITION_MAGIC);
          if(magic != g_magicPrinc && magic != g_magicCop)
             continue;
-         ArrayResize(tickets, n + 1);
+         if(ArrayResize(tickets, n + 1) != n + 1)
+            break;
          tickets[n] = ticket;
          n++;
         }
@@ -471,7 +533,8 @@ bool DentroOrario()
    if(!InpUsaFiltroOrario)
       return true;
    MqlDateTime dt;
-   TimeToStruct(TimeCurrent(), dt);
+   if(!TimeToStruct(TimeCurrent(), dt))
+      return false;
    int adesso = dt.hour * 60 + dt.min;
    int inizio = InpOraInizio * 60 + InpMinutoInizio;
    int fine   = InpOraFine * 60 + InpMinutoFine;
@@ -490,7 +553,8 @@ bool LontanoDaiBordiSessione()
    if(InpMargineSessioneMin <= 0)
       return true;
    MqlDateTime dt;
-   TimeToStruct(TimeCurrent(), dt);
+   if(!TimeToStruct(TimeCurrent(), dt))
+      return false;
    int adesso  = dt.hour * 3600 + dt.min * 60 + dt.sec;
    int margine = InpMargineSessioneMin * 60;
    bool trovata = false;
@@ -502,8 +566,8 @@ bool LontanoDaiBordiSessione()
       trovata = true;
       int sDa = (int)((long)da % 86400);
       int sA  = (int)(long)a;
-      if(sA > 86400)
-         sA = 86400;
+      if(sA > 86400 || sA <= sDa)
+         sA = 86400;                        // fine sessione "24:00"
       if(adesso >= sDa && adesso < sA)
         {
          if(adesso - sDa < margine)
@@ -660,7 +724,7 @@ void AggiornaPannello(const StatoPosizioni &s)
    txt += StringFormat("Principali: %d / %d    Coperture: %d / %d\n", s.nPrinc, InpMaxPrincipali, s.nCop, InpMaxCoperture);
    txt += StringFormat("Lotto attuale: %.2f  (prossimo ciclo: %.2f)\n", lotto, CalcolaLotto());
    txt += StringFormat("Basket netto: %.2f %s%s\n", s.profittoNetto, valuta,
-                       (InpBasketTP > 0.0 ? StringFormat("  (target %.2f)", InpBasketTP) : ""));
+                       (InpBasketTP_EUR > 0.0 ? StringFormat("  (target %.2f)", InpBasketTP_EUR) : ""));
    txt += StringFormat("P/L giorno: %.2f %s (%.2f%%)   saldo inizio: %.2f\n", plGiorno, valuta, plPerc, g_saldoInizioGiorno);
    txt += StringFormat("Picco equity: %.2f   Drawdown: %.2f%% (max %.1f%%)\n", g_piccoEquity, ddPerc, InpDrawdownMax);
    txt += StringFormat("Blocco giornaliero: %s\n", (bloccoG ? "ATTIVO (riprende domani)" : "no"));
@@ -801,8 +865,7 @@ int OnInit()
 //--- configurazione CTrade
    g_trade.SetExpertMagicNumber((ulong)g_magicPrinc);
    g_trade.SetDeviationInPoints((ulong)InpSlippagePunti);
-   if(!g_trade.SetTypeFillingBySymbol(_Symbol))
-      Print("GabbiaGold: impossibile impostare la modalità di riempimento dal simbolo, uso quella predefinita");
+   ImpostaFilling();
    g_trade.SetMarginMode();
    g_trade.SetAsyncMode(false);
    g_trade.LogLevel(LOG_LEVEL_ERRORS);
@@ -844,10 +907,10 @@ void OnDeinit(const int reason)
   {
 // salva il motivo: REASON_REMOVE (EA tolto dal grafico) vale come "riavvio manuale"
    GVSet("DEINIT", (double)reason);
-   if(g_hEMAVeloce != INVALID_HANDLE)
-      IndicatorRelease(g_hEMAVeloce);
-   if(g_hEMALenta != INVALID_HANDLE)
-      IndicatorRelease(g_hEMALenta);
+   if(g_hEMAVeloce != INVALID_HANDLE && !IndicatorRelease(g_hEMAVeloce))
+      Print("GabbiaGold: impossibile rilasciare l'EMA veloce");
+   if(g_hEMALenta != INVALID_HANDLE && !IndicatorRelease(g_hEMALenta))
+      Print("GabbiaGold: impossibile rilasciare l'EMA lenta");
    Comment("");
   }
 
@@ -936,18 +999,20 @@ void OnTick()
       GVSet("DIREZIONE", (double)g_direzione);
       ScanPosizioni(s);
      }
-//--- sicurezza: principali residue nel verso sbagliato (es. chiusura fallita) -> ritenta
-   if((g_direzione == 1 && s.nPrincSell > 0) || (g_direzione == -1 && s.nPrincBuy > 0))
+//--- sicurezza: posizioni residue nel verso sbagliato (es. chiusura fallita) -> ritenta
+//    principali devono essere nel verso della direzione, coperture nel verso opposto
+   if((g_direzione == 1 && (s.nPrincSell > 0 || s.nCopBuy > 0)) ||
+      (g_direzione == -1 && (s.nPrincBuy > 0 || s.nCopSell > 0)))
      {
-      ChiudiTutto("principali residue nella direzione opposta");
+      ChiudiTutto("posizioni residue della direzione precedente");
       g_lottoCiclo = 0.0;
       ScanPosizioni(s);
      }
 
 //--- 5) basket take profit
-   if(InpBasketTP > 0.0 && s.nPrinc + s.nCop > 0 && s.profittoNetto >= InpBasketTP)
+   if(InpBasketTP_EUR > 0.0 && s.nPrinc + s.nCop > 0 && s.profittoNetto >= InpBasketTP_EUR)
      {
-      PrintFormat("GabbiaGold: basket TP raggiunto (%.2f >= %.2f)", s.profittoNetto, InpBasketTP);
+      PrintFormat("GabbiaGold: basket TP raggiunto (%.2f >= %.2f)", s.profittoNetto, InpBasketTP_EUR);
       ChiudiTutto("basket take profit");
       g_lottoCiclo = 0.0;
       ScanPosizioni(s);
