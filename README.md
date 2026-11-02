@@ -100,46 +100,55 @@ ciclo, prossimo lotto e risultato del ciclo rispetto all'obiettivo.
 
 File: [`MQL5/Experts/ScalperTrend.mq5`](MQL5/Experts/ScalperTrend.mq5)
 
-Prende al posto del vecchio *Scalper Bilaterale*, che entrava a ogni
-movimento di 1 pip con uno stop di 2 pips e veniva mangiato dallo spread.
-Questo entra meno spesso, solo a favore del trend e con conferma, e calcola
-la size dal rischio in % del saldo.
+Scalper dinamico a favore di trend: decide a ogni candela M1 (ogni minuto),
+entra solo se il prezzo conferma entro 1 minuto e calcola la size dal rischio
+in % del saldo. Prende il posto del vecchio *Scalper Bilaterale*, che entrava
+a ogni movimento di 1 pip con stop a 2 pips e veniva mangiato dallo spread.
 
 ### Come funziona
 
-1. **Trend (M15)**: EMA 50 sopra EMA 200, EMA 50 che sale e prezzo sopra la
+1. **Trend (M5)**: EMA 50 sopra EMA 200, EMA 50 che sale e prezzo sopra la
    EMA 50 → solo BUY. Il contrario → solo SELL. Con ADX sotto 20 (trend
    debole) non entra. BUY e SELL mai insieme.
-2. **Ingresso preciso (M5)**: il prezzo torna a toccare la EMA 20
-   (pullback) e poi una candela chiude di nuovo a favore del trend. Il bot
-   mette un **BUY STOP sopra il massimo** (o **SELL STOP sotto il minimo**)
-   di quella candela: entra solo se il prezzo conferma. Se entro 2 candele
-   non conferma, il segnale viene annullato.
-3. **Stop loss** = ATR × 1.5 (minimo 10 pips), già attaccato al pendente.
-4. **Pareggio e trailing**: quando il profitto arriva a 1 volta lo stop (+1R)
-   lo stop va in pari (+1 pip); da lì segue il prezzo a ATR × 1, solo a favore.
-5. **Fino a 3 ordini a 2 pips**: gli ordini in più si aggiungono solo quando
-   lo stop è già abbastanza avanti da garantire che tutta l'operazione non
-   chiuda in perdita.
-6. **Size che cresce con il capitale**: ogni operazione rischia l'1% del
-   saldo. Saldo 500 → rischio 5; saldo 5000 → rischio 50. Il lotto è
-   calcolato sulla distanza dello stop e arrotondato per difetto, quindi non
-   supera mai il rischio. Se il capitale è troppo piccolo (anche il lotto
-   minimo rischierebbe più del doppio), non entra.
+2. **Ingresso (M1)**, a ogni candela chiusa, in due modi:
+   - **pullback**: il prezzo torna a toccare la EMA 20 e la candela chiude di
+     nuovo a favore del trend;
+   - **rottura**: candela decisa (corpo almeno metà della candela) che chiude
+     oltre il massimo/minimo delle ultime 5 candele.
+
+   Il bot mette un **BUY STOP sopra il massimo** (o **SELL STOP sotto il
+   minimo**) della candela: entra solo se il prezzo conferma **entro 1
+   minuto**, altrimenti annulla.
+3. **Precisione**: niente ingresso dopo candele enormi (oltre 2.5 × ATR,
+   spike da notizie). Lo stop è sempre almeno 4 volte lo spread, così lo
+   spread non mangia l'operazione.
+4. **Stop loss** = ATR M1 × 1.5 (minimo 5 pips), già attaccato al pendente.
+5. **Pareggio e trailing**: a +1R lo stop va in pari (+1 pip); da lì segue il
+   prezzo a ATR × 1, solo a favore.
+6. **Fino a 3 ordini a 2 pips**: aggiunti solo quando lo stop è già abbastanza
+   avanti da garantire che tutta l'operazione non chiuda in perdita.
+7. **Size che cresce con il capitale**: ogni operazione rischia lo 0.5% del
+   saldo (saldo 1000 → 5; saldo 5000 → 25). Lotto arrotondato per difetto,
+   quindi non supera mai il rischio. Se il capitale è troppo piccolo per lo
+   stop, salta il segnale.
 
 ### Parametri principali
 
 | Parametro | Default | Cosa fa |
 |---|---|---|
-| Timeframe trend / EMA | M15 / 50 e 200 | Direzione del trend |
+| Timeframe trend / EMA | M5 / 50 e 200 | Direzione del trend |
 | ADX minimo | 20 | Forza minima del trend (0 = nessun filtro) |
-| Timeframe ingresso / EMA pullback | M5 / 20 | |
-| Validità segnale | 2 candele | |
-| Stop loss | ATR × 1.5, minimo 10 pips | |
+| Timeframe ingresso | M1 | Decide a ogni candela |
+| Ingresso pullback / rottura | sì / sì | Si possono spegnere uno alla volta |
+| EMA pullback | 20 | |
+| Candele rottura | 5 | |
+| Candela massima | ATR × 2.5 | Oltre = spike, niente ingresso |
+| Validità segnale | 1 candela (1 minuto) | |
+| Stop loss | ATR × 1.5, minimo 5 pips e 4 × spread | |
 | Pareggio | a +1R, con +1 pip | |
 | Trailing | ATR × 1 | 0 = solo pareggio |
 | Take profit | 0 (spento) | Stop × R se lo vuoi fisso |
-| Rischio per operazione | 1% del saldo | La size cresce con il capitale |
+| Rischio per operazione | 0.5% del saldo | La size cresce con il capitale |
 | Ordini massimi / passo | 3 / 2 pips | |
 | Stop giornaliero | 0 (spento) | Es. 3 = stop per oggi a -3% |
 | Operazioni massime al giorno | 0 (nessun limite) | |
@@ -148,10 +157,10 @@ la size dal rischio in % del saldo.
 
 ### Da sapere
 
-- Nessun bot garantisce profitto: il filtro di trend e il rischio fisso
-  servono a entrare meno e a perdere poco quando sbaglia.
+- Nessun bot garantisce profitto. Il drawdown si tiene basso soprattutto con
+  il **rischio per operazione**: con 0.5%, 10 perdite di fila fanno circa -5%.
+- Entra più spesso della versione su M5. Per ancora più ingressi: abbassa
+  l'ADX minimo (es. 15) o allarga l'orario. Per meno ingressi ma più
+  selezionati: spegni la rottura e tieni solo il pullback.
 - Provalo prima nel **tester** con **Ogni tick basato su tick reali** su
   qualche mese, poi su un **conto demo**, e solo dopo con soldi veri.
-- Con l'oro e lotto minimo 0.01 servono circa 200–300 € perché il rischio
-  dell'1% sia rispettato; con meno il bot salta i segnali invece di
-  rischiare troppo.

@@ -3,16 +3,19 @@
 //|  Scalper a favore di trend: entrate selezionate e confermate,    |
 //|  size a rischio fisso che cresce con il capitale                 |
 //|                                                                  |
-//|  - Trend (M15): EMA 50 sopra/sotto EMA 200, EMA 50 inclinata e   |
+//|  - Trend (M5): EMA 50 sopra/sotto EMA 200, EMA 50 inclinata e    |
 //|    ADX >= 20. Solo BUY in trend rialzista, solo SELL in ribasso, |
 //|    mai insieme. Senza trend non entra.                           |
-//|  - Ingresso (M5): pullback che tocca l'EMA 20, poi una candela   |
-//|    che chiude di nuovo a favore del trend. Pendente STOP sopra   |
-//|    il massimo (BUY) o sotto il minimo (SELL) di quella candela:  |
-//|    entra solo se il prezzo conferma. Valido 2 candele.           |
-//|  - Stop = ATR x 1.5 (minimo 10 pips), pareggio a +1R, poi        |
+//|  - Ingresso (M1, decide ogni minuto) in due modi:                |
+//|    pullback: il prezzo tocca l'EMA 20 e riparte a favore;        |
+//|    rottura: candela decisa che chiude oltre le ultime 5 candele. |
+//|    Pendente STOP oltre il massimo (BUY) o il minimo (SELL) della |
+//|    candela: entra solo se il prezzo conferma entro 1 minuto.     |
+//|  - Precisione: niente ingressi dopo candele enormi (spike) e     |
+//|    stop sempre almeno 4 volte lo spread.                         |
+//|  - Stop = ATR x 1.5 (minimo 5 pips), pareggio a +1R, poi         |
 //|    trailing stop a ATR x 1 che segue il prezzo.                  |
-//|  - Size: rischio 1% del saldo per operazione, quindi cresce (e   |
+//|  - Size: rischio 0.5% del saldo per operazione, quindi cresce (e |
 //|    cala) con il capitale. Se il capitale e' troppo piccolo per   |
 //|    lo stop, non entra invece di rischiare troppo.                |
 //|  - Fino a 3 ordini a 2 pips, aggiunti solo quando lo stop        |
@@ -21,8 +24,9 @@
 //|    operazioni al giorno ci sono ma sono spenti di default.       |
 //+------------------------------------------------------------------+
 #property copyright   "gabrielemarenco16-byte"
-#property version     "3.00"
-#property description "Scalper a favore di trend: pullback + rottura confermata, stop ATR, pareggio e trailing,"
+#property version     "4.00"
+#property description "Scalper dinamico a favore di trend: ingressi M1 (pullback o rottura) confermati entro 1 minuto,"
+#property description "stop ATR, pareggio e trailing,"
 #property description "size a rischio % del saldo (cresce con il capitale)."
 
 #include <Trade\Trade.mqh>
@@ -38,31 +42,36 @@ enum ENUM_LATI
 //| Parametri                                                        |
 //+------------------------------------------------------------------+
 input group "=== Trend (filtro principale) ==="
-input ENUM_TIMEFRAMES InpTFTrend    = PERIOD_M15; // Timeframe del trend
+input ENUM_TIMEFRAMES InpTFTrend    = PERIOD_M5;  // Timeframe del trend
 input int             InpEMAVeloce  = 50;         // EMA veloce
 input int             InpEMALenta   = 200;        // EMA lenta
 input int             InpADXPeriodo = 14;         // Periodo ADX
 input double          InpADXMin     = 20;         // Forza minima del trend (ADX, 0 = nessun filtro)
 
-input group "=== Ingresso preciso (pullback + rottura) ==="
-input ENUM_TIMEFRAMES InpTFIngresso    = PERIOD_M5;     // Timeframe di ingresso
-input int             InpEMAPullback   = 20;            // EMA del pullback
-input int             InpBarrePullback = 3;             // Il pullback deve toccare l'EMA nelle ultime N candele
-input double          InpBufferPips    = 0.5;           // Margine oltre il massimo/minimo della candela (pips)
-input int             InpValiditaBarre = 2;             // Il segnale resta valido per N candele
-input ENUM_LATI       InpLati          = LATI_ENTRAMBI; // Lati su cui operare
+input group "=== Ingresso preciso e veloce ==="
+input ENUM_TIMEFRAMES InpTFIngresso       = PERIOD_M1;     // Timeframe di ingresso (decide a ogni candela)
+input bool            InpIngressoPullback = true;          // Ingresso sul pullback all'EMA
+input bool            InpIngressoRottura  = true;          // Ingresso sulla rottura delle ultime candele
+input int             InpEMAPullback      = 20;            // EMA del pullback
+input int             InpBarrePullback    = 3;             // Il pullback deve toccare l'EMA nelle ultime N candele
+input int             InpBarreRottura     = 5;             // Rottura: chiusura oltre il max/min delle ultime N candele
+input double          InpMaxCandelaATR    = 2.5;           // Niente ingresso se la candela e' piu' grande di ATR x (spike)
+input double          InpBufferPips       = 0.5;           // Margine oltre il massimo/minimo della candela (pips)
+input int             InpValiditaBarre    = 1;             // Il segnale resta valido per N candele (1 = 1 minuto)
+input ENUM_LATI       InpLati             = LATI_ENTRAMBI; // Lati su cui operare
 
 input group "=== Stop loss, pareggio, trailing ==="
 input int    InpATRPeriodo  = 14;  // Periodo ATR (timeframe di ingresso)
 input double InpSLATR       = 1.5; // Stop loss = ATR x
-input double InpSLMinPips   = 10;  // Stop loss minimo (pips)
+input double InpSLMinPips   = 5;   // Stop loss minimo (pips)
+input double InpStopMinSpread = 4; // Stop loss almeno N volte lo spread (0 = nessun minimo)
 input double InpBreakEvenR  = 1.0; // Stop in pari quando il profitto arriva a R x lo stop
 input double InpBELockPips  = 1.0; // Pips garantiti con il pareggio
 input double InpTrailingATR = 1.0; // Dopo il pareggio lo stop segue il prezzo a ATR x (0 = solo pareggio)
 input double InpTPR         = 0;   // Take profit = stop x R (0 = nessuno, solo trailing)
 
 input group "=== Size: cresce con il capitale ==="
-input double InpRischioPerc  = 1.0; // Rischio per operazione (% del saldo)
+input double InpRischioPerc  = 0.5; // Rischio per operazione (% del saldo)
 input int    InpMaxOrdini    = 3;   // Ordini massimi per operazione
 input double InpPassoPips    = 2.0; // Distanza minima tra gli ordini aggiunti (pips)
 input double InpLottoMassimo = 5.0; // Lotto massimo per ordine (0 = nessun limite)
@@ -125,7 +134,9 @@ double g_sommaVolPrezzo = 0;
 int OnInit()
   {
    if(InpEMAVeloce < 1 || InpEMALenta <= InpEMAVeloce || InpADXPeriodo < 1 || InpADXMin < 0 ||
-      InpEMAPullback < 1 || InpBarrePullback < 1 || InpBufferPips < 0 || InpValiditaBarre < 1 ||
+      InpEMAPullback < 1 || InpBarrePullback < 1 || InpBarreRottura < 1 || InpMaxCandelaATR < 0 ||
+      InpStopMinSpread < 0 || (!InpIngressoPullback && !InpIngressoRottura) ||
+      InpBufferPips < 0 || InpValiditaBarre < 1 ||
       InpATRPeriodo < 1 || InpSLATR <= 0 || InpSLMinPips < 0 || InpBreakEvenR <= 0 || InpBELockPips < 0 ||
       InpTrailingATR < 0 || InpTPR < 0 || InpRischioPerc <= 0 || InpRischioPerc > 10 ||
       InpMaxOrdini < 1 || InpPassoPips <= 0 || InpPerditaMaxGiornoPerc < 0 ||
@@ -282,15 +293,71 @@ bool SegnalePullback(bool buy)
   }
 
 //+------------------------------------------------------------------+
+//| Rottura: candela decisa (corpo >= meta' della candela) che       |
+//| chiude oltre il massimo/minimo delle ultime N candele e dalla    |
+//| parte giusta dell'EMA                                            |
+//+------------------------------------------------------------------+
+bool SegnaleRottura(bool buy)
+  {
+   double apertura = iOpen(_Symbol, InpTFIngresso, 1);
+   double chiusura = iClose(_Symbol, InpTFIngresso, 1);
+   double massimo  = iHigh(_Symbol, InpTFIngresso, 1);
+   double minimo   = iLow(_Symbol, InpTFIngresso, 1);
+   double ema1     = ValoreBuffer(g_hEmaPullback, 0, 1);
+   if(apertura <= 0 || chiusura <= 0 || ema1 <= 0 || massimo <= minimo)
+      return false;
+
+   if(MathAbs(chiusura - apertura) < 0.5 * (massimo - minimo))
+      return false; // candela indecisa
+   if(buy && !(chiusura > apertura && chiusura > ema1))
+      return false;
+   if(!buy && !(chiusura < apertura && chiusura < ema1))
+      return false;
+
+   if(buy)
+     {
+      int iMax = iHighest(_Symbol, InpTFIngresso, MODE_HIGH, InpBarreRottura, 2);
+      return iMax >= 0 && chiusura > iHigh(_Symbol, InpTFIngresso, iMax);
+     }
+   int iMin = iLowest(_Symbol, InpTFIngresso, MODE_LOW, InpBarreRottura, 2);
+   return iMin >= 0 && chiusura < iLow(_Symbol, InpTFIngresso, iMin);
+  }
+
+//+------------------------------------------------------------------+
+//| Distanza dello stop: ATR x fattore, mai sotto il minimo in pips  |
+//| e mai sotto N volte lo spread (cosi' lo spread non lo mangia)    |
+//+------------------------------------------------------------------+
+double DistanzaStop(double atr, double spread)
+  {
+   double d = MathMax(atr * InpSLATR, InpSLMinPips * g_pip);
+   if(InpStopMinSpread > 0)
+      d = MathMax(d, spread * InpStopMinSpread);
+   return d;
+  }
+
+//+------------------------------------------------------------------+
 //| A ogni nuova candela: se c'e' un segnale ne salvo livello e stop |
 //+------------------------------------------------------------------+
 void CercaSegnale()
   {
-   int segnale = 0;
-   if(g_trend > 0 && InpLati != LATI_SOLO_SELL && SegnalePullback(true))
-      segnale = 1;
-   if(g_trend < 0 && InpLati != LATI_SOLO_BUY && SegnalePullback(false))
-      segnale = -1;
+   int    segnale = 0;
+   string tipo    = "";
+   if(g_trend > 0 && InpLati != LATI_SOLO_SELL)
+     {
+      if(InpIngressoPullback && SegnalePullback(true))
+        { segnale = 1; tipo = "pullback"; }
+      else
+         if(InpIngressoRottura && SegnaleRottura(true))
+           { segnale = 1; tipo = "rottura"; }
+     }
+   if(g_trend < 0 && InpLati != LATI_SOLO_BUY)
+     {
+      if(InpIngressoPullback && SegnalePullback(false))
+        { segnale = -1; tipo = "pullback"; }
+      else
+         if(InpIngressoRottura && SegnaleRottura(false))
+           { segnale = -1; tipo = "rottura"; }
+     }
 
    if(segnale == 0)
      {
@@ -307,9 +374,17 @@ void CercaSegnale()
    if(!SymbolInfoTick(_Symbol, t) || atr <= 0)
       return;
 
-   double slDist = MathMax(atr * InpSLATR, InpSLMinPips * g_pip);
-   double buffer = InpBufferPips * g_pip;
+   //--- precisione: niente ingresso dopo una candela enorme (spike)
+   double candela = iHigh(_Symbol, InpTFIngresso, 1) - iLow(_Symbol, InpTFIngresso, 1);
+   if(InpMaxCandelaATR > 0 && candela > atr * InpMaxCandelaATR)
+     {
+      PrintFormat("Segnale %s scartato: candela troppo grande (%.1f pips).", tipo, candela / g_pip);
+      return;
+     }
+
    double spread = t.ask - t.bid;
+   double buffer = InpBufferPips * g_pip;
+   double slDist = DistanzaStop(atr, spread);
 
    if(segnale > 0)
      {
@@ -327,7 +402,7 @@ void CercaSegnale()
    g_scadenza = TimeCurrent() + InpValiditaBarre * PeriodSeconds(InpTFIngresso);
    CancellaPendenti(); // un eventuale pendente vecchio viene sostituito
 
-   PrintFormat("Segnale %s: ingresso a %s, stop %s (%.1f pips)", segnale > 0 ? "BUY" : "SELL",
+   PrintFormat("Segnale %s (%s): ingresso a %s, stop %s (%.1f pips)", segnale > 0 ? "BUY" : "SELL", tipo,
                DoubleToString(g_livello, _Digits), DoubleToString(g_sl, _Digits), slDist / g_pip);
   }
 
@@ -435,7 +510,7 @@ void GestisciStop(ENUM_POSITION_TYPE dir)
    //--- ordine senza stop (non dovrebbe capitare): metto subito lo stop ATR
    if(nuovo <= 0)
      {
-      double slDist = MathMax(atr * InpSLATR, InpSLMinPips * g_pip);
+      double slDist = DistanzaStop(atr, t.ask - t.bid);
       nuovo = buy ? ArrotondaTick(g_primoPrezzo - slDist, false) : ArrotondaTick(g_primoPrezzo + slDist, true);
      }
 
@@ -846,7 +921,7 @@ void Pannello(bool stopOggi)
             testo += StringFormat("Segnale %s: ingresso a %s, stop %s\n", g_segnale > 0 ? "BUY" : "SELL",
                                   DoubleToString(g_livello, _Digits), DoubleToString(g_sl, _Digits));
          else
-            testo += OrarioOk() ? "In attesa di un pullback a favore del trend\n" : "Fuori orario\n";
+            testo += OrarioOk() ? "In attesa di un segnale a favore del trend (pullback o rottura)\n" : "Fuori orario\n";
    Comment(testo);
   }
 //+------------------------------------------------------------------+
